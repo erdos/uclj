@@ -1,0 +1,24 @@
+[
+  {
+    "name" : "clojure.lang.Var",
+    "queryAllDeclaredConstructors" : true,
+    "queryAllPublicConstructors" : true,
+    "queryAllDeclaredMethods" : true,
+    "queryAllPublicMethods" : true,
+    "allDeclaredClasses" : true,
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true,
+    "allPublicClasses" : true
+    },
+    {"name": "clojure.lang.Numbers",
+     "allDeclaredFields": true,
+     "allDeclaredMethods": true
+    },
+    {"name": "java.lang.Number",
+     "allDeclaredFields": true,
+     "allDeclaredMethods": true
+    },
+    {"name": "java.util.concurrent.atomic.AtomicReferenceArray",
+     "allDeclaredConstructors": true
+    }
+]
