@@ -2,6 +2,7 @@
   (:gen-class)
   (:import [clojure.lang Gateway Var]
            [java.lang Number]
+           [java.io StringWriter]
            [java.util.concurrent.atomic AtomicReferenceArray]))
 
 (def basic-bindings
