@@ -81,7 +81,9 @@
   (is (= '(. Integer valueOf 34)
          (macroexpand-all-code '(Integer/valueOf 34))))
   (is (= '(. "" toString)
-         (macroexpand-all-code '(.toString "")))))
+         (macroexpand-all-code '(.toString ""))))
+
+  )
 
 
 (deftest test-core-async

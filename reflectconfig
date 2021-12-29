@@ -21,6 +21,7 @@
     {"name": "java.util.concurrent.atomic.AtomicReferenceArray",
      "allDeclaredConstructors": true
     },
+    {"name": "clojure.lang.LazySeq", "allDeclaredConstructors": true},
     {"name": "java.io.StringWriter",
      "allDeclaredConstructors": true,
      "allDeclaredMethods": true}
