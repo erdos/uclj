@@ -195,6 +195,7 @@
   clojure.lang.IPersistentMap    (evalme [t b] (reduce-kv (fn [m k v] (assoc m (evalme k b) (evalme v b))) {} t))
   clojure.lang.IPersistentSet    (evalme [s b] (into (empty s) (for [x s] (evalme x b)))))
 
+;; TODO: test with interfaces instead of protocols!
 (defmacro gen-eval-node [body]
   `(reify EvalNode
      (evalme [_ ~'&b] ~body)))
@@ -399,24 +400,22 @@
     (case (count bindings)
       1
       (let [[[k v]] bindings]
-        (reify EvalNode
-          (evalme [_ let-bindings]
-            (loop [let-bindings (assoc let-bindings k (evalme v let-bindings))]
-              (let [last-res (evalme body-node let-bindings)]
-                (if (instance? Recur last-res)
-                  (recur (assoc let-bindings k (first (:bindings last-res))))
-                  last-res))))))
+        (gen-eval-node
+         (loop [&b (assoc &b k (evalme v &b))]
+           (let [last-res (evalme body-node &b)]
+             (if (instance? Recur last-res)
+               (recur (assoc &b k (first (:bindings last-res))))
+               last-res)))))
 
       ;; else
-      (reify EvalNode
-        (evalme [_ let-bindings]
-          (loop [let-bindings (persistent! (reduce (fn [let-bindings [k v]]
-                                                     (assoc! let-bindings k (evalme v let-bindings)))
-                                                   (transient let-bindings) bindings))]
-            (let [last-res (evalme body-node let-bindings)]
-              (if (instance? Recur last-res)
-                (recur (into let-bindings (zipmap (map first bindings) (:bindings last-res))))
-                last-res))))))))
+      (gen-eval-node
+       (loop [&b (reduce (fn [&b [k v]]
+                           (assoc &b k (evalme v &b)))
+                         &b bindings)]
+         (let [last-res (evalme body-node &b)]
+           (if (instance? Recur last-res)
+             (recur (into &b (zipmap (map first bindings) (:bindings last-res))))
+             last-res)))))))
 
 (defmethod seq->eval-node 'new seq-eval-new [[_ class-name & args]]
   (let [clz (symbol->class class-name)
@@ -435,13 +434,12 @@
   (let [nodes (mapv ->eval-node values)
         size  (count nodes)
         cache (object-array size)]
-    (reify EvalNode
-      (evalme [_ bindings]
-        (loop [i 0]
-          (if (< i size)
-            (do (aset cache i (evalme (nth nodes i) bindings))
-                (recur (inc i)))
-            (->Recur cache)))))))
+    (gen-eval-node
+     (loop [i 0]
+       (if (< i size)
+         (do (aset cache i (evalme (nth nodes i) &b))
+             (recur (inc i)))
+         (->Recur cache))))))
 
 (defmethod seq->eval-node 'throw [[_ e :as form]]
   (assert (= 2 (count form)))
@@ -465,12 +463,11 @@
     (let [args (map ->eval-node args)]
       (if-let [target-class (cond (class? target) target
                                   (and (symbol? target) (class? (resolve target))) (resolve target))]
-        (reify EvalNode
-          (evalme [_ b]
-            (clojure.lang.Reflector/invokeStaticMethod
-             ^Class target-class
-             (name field)
-             ^objects (into-array Object (for [a args] (evalme a b))))))
+        (gen-eval-node
+         (clojure.lang.Reflector/invokeStaticMethod
+          ^Class target-class
+          (name field)
+          ^objects (into-array Object (for [a args] (evalme a &b)))))
         (let [target (->eval-node target)]
           (if (= 'nth field) ;; very common in let* forms
             (gen-eval-node
