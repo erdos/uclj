@@ -167,48 +167,6 @@
     (dorun (map (fn [[k v] p] (deliver p (evaluate let-bindings v))) bindings promises))
     (eval-block let-bindings bodies)))
 
-
-
-#_ ;; TODO!!!
-(defmethod eval-seq 'case* [a [_ value shift mask default-value imap switch-type mode skip-check :as form]]
-  ;; (case* ~ge ~shift ~mask ~default ~imap ~switch-type :int)
-  ;; switch-type: sparse vs compact
-  ;; mode: ints hashes identity
-  ;; - ints: if all keys are integers between MIN and MAX values
-  ;; - hash-identity: if all keys are keywords
-  ;; - hash-equiv: objects
-                                        ;(println :case* form)
-  (let [ev (evaluate a value)
-        eh (clojure.lang.Util/hash ev)
-        th (if (zero? mask) eh (bit-and (bit-shift-right eh shift) mask))
-        [h branch] (get imap th)]
-    ; (println "value: " ev eh th)
-    (if-let [[h branch] (imap th)]
-      (if (and skip-check (not (skip-check th)))
-        (if (= eh h)
-          (evaluate a branch)
-          (evaluate a default-value))
-        (evaluate a branch))
-      (evaluate a default-value))))
-
-
-#_ ;; TODO!!!!
-(defmethod eval-seq 'try [a [_ & xs]]
-  (let [finally-bodies (some (fn [x] (when (and (seq? x) (= 'finally (first x))) (next x))) xs)
-        ;; ((class-name var-name bodies*)*)
-        catch-clauses  (keep (fn [x] (when (and (seq? x) (= 'catch (first x)))
-                                       (list* (resolve (second x)) (nnext x)))) xs)
-        bodies         (remove (fn [x] (and (seq? x) ('#{finally catch} (first x)))) xs)]
-    (try (eval-block a bodies)
-         (catch Throwable t
-           (if-let [[v & bodies]
-                    (some (fn [[c & v+bodies]] (when (instance? c t) v+bodies)) catch-clauses)]
-             (eval-block (assoc a v t) bodies)
-             (throw t)))
-         (finally
-           (doseq [b finally-bodies]
-             (evaluate a b))))))
-
 (defn- eval-sym [a x]
   (assert (map? a) (str "Not map " (pr-str a)))
   (assert (symbol? x) (str "Not symbol " (pr-str x)))
@@ -276,6 +234,30 @@
         (evalme [_ b]
           (if (evalme condition b)
             (evalme then b)))))))
+
+(defmethod seq->eval-node 'case* seq-eval-case
+  [[_ value shift mask default-value imap switch-type mode skip-check :as form]]
+  ;; (case* ~ge ~shift ~mask ~default ~imap ~switch-type :int)
+  ;; switch-type: sparse vs compact
+  ;; mode: ints hashes identity
+  ;; - ints: if all keys are integers between MIN and MAX values
+  ;; - hash-identity: if all keys are keywords
+  ;; - hash-equiv: objects
+  (let [imap (zipmap (keys imap)
+                     (for [[h branch] (vals imap)]
+                       [h (->eval-node branch)]))
+        default-value (->eval-node default-value)]
+    (gen-eval-node
+     (let [ev (evalme value &b)
+           eh (clojure.lang.Util/hash ev)
+           th (if (zero? mask) eh (bit-and (bit-shift-right eh shift) mask))]
+       (if-let [[h branch] (get imap th)]
+         (if (and skip-check (not (skip-check th)))
+           (if (= eh h)
+             (evalme branch &b)
+             (evalme default-value &b))
+           (evalme branch &b))
+         (evalme default-value &b))))))
 
 (defmethod seq->eval-node 'do seq-eval-do [[_ & bodies]]
   (let [bodies (map ->eval-node bodies)]
@@ -483,10 +465,10 @@
   (let [e (->eval-node e)]
     (reify EvalNode (evalme [_ b] (-> e (evalme b) (evalme nil))))))
 
-(defmethod seq->eval-node 'var [_ [_ x]]
+(defmethod seq->eval-node 'var [[_ x]]
   (let [x (resolve x)] ;; TODO!
     (assert x (str "Unable to resolve var: " x "in this context"))
-    x))
+    (reify EvalNode (evalme [_ _] x))))
 
 (defmethod seq->eval-node '. [[_ target field & args]]
 
@@ -508,12 +490,28 @@
                 (nth (evalme target b)
                      (evalme (first args) b)
                      (evalme (second args) b))))
-            (assert false "Illegal reflectioN!")
-            #_
             (reify EvalNode
               (evalme [_ b]
                 (clojure.lang.Reflector/invokeInstanceMethod
                  (evalme target b) (name field) (into-array Object (for [a args] (evalme a b))))))))))))
+
+(defmethod seq->eval-node 'try [[_ & xs]]
+  (let [catch-clauses  (keep (fn [x] (when (and (seq? x) (= 'catch (first x)))
+                                       [(resolve (nth x 1)) ;; type
+                                        (nth x 2) ;; variable
+                                        (->eval-node (list* 'do (nthrest x 2)))]))
+                             xs)
+        bodies         (remove (fn [x] (and (seq? x) ('#{finally catch} (first x)))) xs)
+        body-node (seq->eval-node (list* 'do bodies))
+        finally-node (some (fn [x] (when (and (seq? x) (= 'finally (first x)))
+                                     (->eval-node (list* 'do (next x))))) xs)]
+    (gen-eval-node
+     (try (evalme body-node &b)
+          (catch Throwable t
+            (if-let [[_ v node] (some (fn [[c v node :as item]] (when (instance? c t) item)) catch-clauses)]
+              (evalme node (assoc &b v t))
+              (throw t)))
+          (finally (evalme finally-node &b))))))
 
 (defn ->eval-node [expr]
   (cond (seq? expr)  (seq->eval-node expr)
