@@ -222,6 +222,13 @@
       (gen-eval-node (if (evalme condition &b) (evalme then &b) (evalme else &b)))
       (gen-eval-node (if (evalme condition &b) (evalme then &b))))))
 
+(defmethod seq->eval-node 'def seq-eval-def [[_ def-name & def-bodies]]
+  (let [[docstring def-value] (if (= 2 (count def-bodies))
+                                def-bodies
+                                [nil (first def-bodies)])
+        value-node (->eval-node def-value)]
+    (gen-eval-node (intern *ns* def-name (evalme value-node &b)))))
+
 (defmethod seq->eval-node 'case* seq-eval-case
   [[_ value shift mask default-value imap switch-type mode skip-check :as form]]
   ;; (case* ~ge ~shift ~mask ~default ~imap ~switch-type :int)
@@ -478,7 +485,7 @@
 (defmethod seq->eval-node 'recur seq-eval-recur [[_ & values]]
   (let [nodes (mapv ->eval-node values)
         size  (count nodes)
-        cache (object-array size)]
+        cache (object-array size)] ;; TODO: cache is not thread-safe!
     (gen-eval-node
      (loop [i 0]
        (if (< i size)
