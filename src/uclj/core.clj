@@ -23,8 +23,8 @@
         ;clojure.edn
         [clojure.java.io :as io]
         ;[clojure.pprint :as pprint]
-        ;clojure.string
-        ;clojure.set
+        clojure.string
+        clojure.set
         ;[clojure.test :refer [deftest testing is are]]
         ;clojure.walk
         ;[clojure.zip :as zip]
@@ -546,23 +546,11 @@
         (map? expr)  (persistent! (reduce-kv (fn [a k v] (assoc! a (->eval-node k) (->eval-node v))) (empty expr) (transient expr)))
         (coll? expr) (into (empty expr) (map ->eval-node expr))
 
-        ;; statically lookup common core symbols!
-        (symbol? expr) (cond (#{"clojure.core"
-                                "clojure.core.async"
-                                "clojure.core.async.impl.dispatch"
-                                "clojure.core.async.impl.ioc-macros"} (namespace expr))
-                             (let [s @(resolve expr)] (gen-eval-node s))
-
-                             ('#{= * + div rem mod quot first apply range cons zero? deliver
-                                 inc dec println doall map read-string re-seq slurp partition promise memoize str not-empty not name atom pos? swap! reset! even? odd? /
-
-                                 } expr) ;; TODO: static compilation!
-                             (let [s @(resolve expr)] (gen-eval-node s))
-
-                             :else expr)
+        ;; TODO: statically lookup common core symbols! check that symbol is not yet bound!!!!!
+        (symbol? expr) (if (var? (resolve expr))
+                         (let [s @(resolve expr)] (gen-eval-node s))
+                         expr)
         :else expr))
-
-
 
 (defn expand-and-eval [expr]
   (let [expanded (macroexpand-all-code expr)

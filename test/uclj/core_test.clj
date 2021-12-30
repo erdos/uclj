@@ -118,3 +118,7 @@
   (is (= '(a b)
           (evaluator '(loop [a 1 b 2] (uclj.core-test/macroenv 4 4)))))
   )
+
+(deftest test-accessiable-namespaces
+  (is (= true (evaluator '(clojure.string/blank? ""))))
+  (is (= #{1 2 3} (evaluator '(clojure.set/union #{1 2} #{2 3})))))
