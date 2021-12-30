@@ -50,6 +50,14 @@
       (is (= "f" (evaluator '(. "asdf" substring 3))))
       (is (= "f" (evaluator '(. "asdf" (substring 3))))))))
 
+(deftest test-letfn
+  (is (= 1
+         (evaluator
+          '(letfn [(collatz [n] (cond (= 1 n) 1 (even? n) (div2 n) (odd? n) (add3 n)))
+                   (div2 [x] (collatz (/ x 2)))
+                   (add3 [x] (collatz (+ 1 (* 3 x))))]
+             (collatz 12))))))
+
 (deftest test-case
   ;; (is (= :one (evaluator '(case 1 1 :one 2 :two 3 :three 4))))
 
