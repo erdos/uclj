@@ -159,16 +159,13 @@
 (defn- eval-sym [a x]
   (assert (map? a) (str "Not map " (pr-str a)))
   (assert (symbol? x) (str "Not symbol " (pr-str x)))
-  (if-let [[_ v] (find a x)]
-    v
-    (do ;if-let [resolved (resolve x)]
-      ;(assert false (str "Should not have resolved! " x (pr-str resolved)))
-      ;; (deref resolved)
-      (if-let [parent (some-> x namespace symbol resolve)]
-        (if (class? parent)
-          (clojure.lang.Reflector/getStaticField ^Class parent (name x))
-          (assert false (str "Cannot access " (name x) "in namespace " parent)))
-        (assert false (str "Cannot resolve " x))))))
+  (if-let [[_ sym-value] (find a x)]
+    sym-value
+    (if-let [parent (some-> x namespace symbol resolve)]
+      (if (class? parent)
+        (clojure.lang.Reflector/getStaticField ^Class parent (name x))
+        (assert false (str "Cannot access " (name x) "in namespace " parent)))
+      (assert false (str "Cannot resolve " x)))))
 
 ;(def eval-sym (memoize eval-sym))
 
@@ -512,23 +509,58 @@
 
   ;; TODO: how is it possible that symbol is already resolved to Class here?
   (let [[field args] (if (seq? field) [(first field) (next field)] [field args])]
-    (let [args (map ->eval-node args)]
+    (let [[arg1 arg2 arg3 :as args] (map ->eval-node args)]
       (if-let [target-class (cond (class? target) target
                                   (and (symbol? target) (class? (resolve target))) (resolve target))]
+        ;; static invocation
         (gen-eval-node
          (clojure.lang.Reflector/invokeStaticMethod
           ^Class target-class
           (name field)
           ^objects (into-array Object (for [a args] (evalme a &b)))))
+
+        ;; instance invocation
         (let [target (->eval-node target)]
-          (if (= 'nth field) ;; very common in let* forms
-            (gen-eval-node
-             (nth (evalme target &b)
-                  (evalme (first args) &b)
-                  (evalme (second args) &b)))
+          (case field
+            nth ;; very common in let* forms
+            (gen-eval-node (nth (evalme target &b) (evalme arg1 &b) (evalme arg2 &b)))
+
+            equals
+            (gen-eval-node (.equals ^Object (evalme target &b) (evalme arg1 &b)))
+
+            ;; else
             (gen-eval-node
              (clojure.lang.Reflector/invokeInstanceMethod
               (evalme target &b) (name field) (into-array Object (for [a args] (evalme a &b)))))))))))
+
+(declare expand-and-eval)
+
+(doseq [lf '[in-ns clojure.core/in-ns]]
+  (defmethod seq->eval-node lf [[_ nssym]]
+    (let [sym-node (->eval-node nssym)]
+      (gen-eval-node
+       (let [new-ns (create-ns (evalme sym-node &b))]
+         ; (println :>! new-ns)
+         (alter-meta! (var *ns*) assoc :dynamic true)
+         (try
+           ;; works in Clojure REPL but does not compile with graal!
+           (.doSet (var *ns*) new-ns)
+           (catch IllegalStateException _
+             ;; compiles but does nothing in REPL
+             (.doReset (var *ns*) new-ns))))))))
+
+(doseq [lf '[clojure.core/load-file load-file]]
+  (defmethod seq->eval-node lf [[_ fname]]
+    (let [arg (->eval-node fname)]
+      (gen-eval-node
+       (with-open [in (new java.io.PushbackReader (io/reader (io/file (evalme arg &b))))]
+         (doseq [read (repeatedly #(read {:eof ::eof} in))
+                 :while (not= ::eof read)]
+           (expand-and-eval read)))))))
+
+(defmethod seq->eval-node 'clojure.core/with-loading-context [[_ & bodies]]
+  ;; needed by (ns) forms
+  (seq->eval-node (list* 'do bodies)))
 
 (defmethod seq->eval-node 'try [[_ & xs]]
   (let [catch-clauses  (keep (fn [x] (when (and (seq? x) (= 'catch (first x)))
@@ -548,15 +580,18 @@
               (throw t)))
           (finally (evalme finally-node &b))))))
 
+(defn sym->eval-node [expr]
+  (if (var? (resolve expr))
+    (let [s @(resolve expr)] (gen-eval-node s))
+    expr))
+
 (defn ->eval-node [expr]
   (cond (seq? expr)  (seq->eval-node expr)
-        (map? expr)  (persistent! (reduce-kv (fn [a k v] (assoc! a (->eval-node k) (->eval-node v))) (empty expr) (transient expr)))
+        (map? expr)  (persistent! (reduce-kv (fn [a k v] (assoc! a (->eval-node k) (->eval-node v))) (transient (empty expr))  expr))
         (coll? expr) (into (empty expr) (map ->eval-node expr))
 
         ;; TODO: statically lookup common core symbols! check that symbol is not yet bound!!!!!
-        (symbol? expr) (if (var? (resolve expr))
-                         (let [s @(resolve expr)] (gen-eval-node s))
-                         expr)
+        (symbol? expr) (sym->eval-node expr)
         :else expr))
 
 (defn expand-and-eval [expr]
@@ -573,12 +608,7 @@
     (println (expand-and-eval (read-string (first args))))
 
     (and (first args) (.exists (io/file (first args))))
-    (with-open [in (new java.io.PushbackReader (io/reader (io/file (first args))))]
-      (loop []
-        (let [read (read {:eof ::eof} in)]
-          (when-not (= ::eof read)
-            (expand-and-eval read)
-            (recur)))))
+    (expand-and-eval `(load-file ~(first args)))
 
     :else ;; interactive mode
     (do (println "Welcome to the small interpreter!")

@@ -1,5 +1,5 @@
 [
-  {
+    {
     "name" : "clojure.lang.Var",
     "queryAllDeclaredConstructors" : true,
     "queryAllPublicConstructors" : true,
@@ -14,6 +14,7 @@
      "allDeclaredFields": true,
      "allDeclaredMethods": true
     },
+    {"name": "clojure.lang.LockingTransaction", "allDeclaredMethods": true},
     {"name": "java.lang.String", "allDeclaredMethods": true},
     {"name": "java.lang.Long", "allDeclaredMethods": true},
     {"name": "java.lang.Double", "allDeclaredMethods": true},
