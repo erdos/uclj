@@ -14,8 +14,15 @@
      "allDeclaredFields": true,
      "allDeclaredMethods": true
     },
-    {"name": "java.lang.IllegalArgumentException",
-     "allDeclaredConstructors": true},
+    {"name": "java.lang.String", "allDeclaredMethods": true},
+    {"name": "java.lang.Long", "allDeclaredMethods": true},
+    {"name": "java.lang.Double", "allDeclaredMethods": true},
+    {"name": "java.lang.Boolean", "allDeclaredMethods": true},
+    {"name": "java.lang.Integer", "allDeclaredMethods": true},
+    {"name": "java.lang.Float", "allDeclaredMethods": true},
+    {"name": "java.lang.AssertionError", "allDeclaredConstructors": true},
+    {"name": "java.lang.IllegalArgumentException", "allDeclaredConstructors": true},
+    {"name": "java.lang.Math", "allDeclaredMethods": true, "allDeclaredFields": true},
     {"name": "java.lang.Number",
      "allDeclaredFields": true,
      "allDeclaredMethods": true
