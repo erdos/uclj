@@ -174,9 +174,10 @@
 
 (extend-protocol EvalNode
   nil                            (evalme [_ _] nil)
-  String                         (evalme [t _] t)
   Number                         (evalme [t _] t)
   Boolean                        (evalme [t _] t)
+  Character                      (evalme [t _] t)
+  String                         (evalme [t _] t)
   java.util.regex.Pattern        (evalme [t _] t)
   clojure.lang.Keyword           (evalme [t _] t)
   clojure.lang.Symbol            (evalme [t b] (eval-sym b t))
