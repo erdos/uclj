@@ -156,22 +156,10 @@
 
 (defrecord Recur [bindings])
 
-(defn- eval-sym [a x]
-  (assert (map? a) (str "Not map " (pr-str a)))
-  (assert (symbol? x) (str "Not symbol " (pr-str x)))
-  (if-let [[_ sym-value] (find a x)]
-    sym-value
-    (if-let [parent (some-> x namespace symbol resolve)]
-      (if (class? parent)
-        (clojure.lang.Reflector/getStaticField ^Class parent (name x))
-        (assert false (str "Cannot access " (name x) "in namespace " parent)))
-      (assert false (str "Cannot resolve " x)))))
-
-;(def eval-sym (memoize eval-sym))
-
 (defprotocol EvalNode
   (evalme [this ^clojure.lang.IPersistentMap bindings]))
 
+;; TODO: inst and uuid?
 (extend-protocol EvalNode
   nil                            (evalme [_ _] nil)
   Number                         (evalme [t _] t)
@@ -180,7 +168,6 @@
   String                         (evalme [t _] t)
   java.util.regex.Pattern        (evalme [t _] t)
   clojure.lang.Keyword           (evalme [t _] t)
-  clojure.lang.Symbol            (evalme [t b] (eval-sym b t))
   clojure.lang.IPersistentVector (evalme [t b] (mapv #(evalme % b) t))
   clojure.lang.IPersistentMap    (evalme [t b] (reduce-kv (fn [m k v] (assoc m (evalme k b) (evalme v b))) {} t))
   clojure.lang.IPersistentSet    (evalme [s b] (into (empty s) (for [x s] (evalme x b)))))
@@ -192,9 +179,9 @@
 
 (declare ->eval-node)
 
-(defmulti seq->eval-node first :default ::default)
-(defmethod seq->eval-node ::default seq-eval-call [s]
-  (let [[f & args] (map ->eval-node s)
+(defmulti seq->eval-node (fn [&a form] (first form)) :default ::default)
+(defmethod seq->eval-node ::default seq-eval-call [&a s]
+  (let [[f & args] (map (partial ->eval-node &a) s)
         [a1 a2 a3 a4 a5 a6 a7] args]
     (dorun args)
     (case (count args)
@@ -210,25 +197,25 @@
       ;; else
       (gen-eval-node (apply (evalme f &b) (for [e args] (evalme e &b)))))))
 
-(defmethod seq->eval-node 'quote seq-eval-quote [[_ quoted]] (gen-eval-node quoted))
+(defmethod seq->eval-node 'quote seq-eval-quote [&a [_ quoted]] (gen-eval-node quoted))
 
-(defmethod seq->eval-node 'if seq-eval-if [[_ condition then else]]
-  (let [condition (->eval-node condition)
-        then      (->eval-node then)
-        else      (->eval-node else)]
+(defmethod seq->eval-node 'if seq-eval-if [&a [_ condition then else]]
+  (let [condition (->eval-node &a condition)
+        then      (->eval-node &a then)
+        else      (->eval-node &a else)]
     (if else ;; shortcut: if else branch is missing then no need to call
       (gen-eval-node (if (evalme condition &b) (evalme then &b) (evalme else &b)))
       (gen-eval-node (if (evalme condition &b) (evalme then &b))))))
 
-(defmethod seq->eval-node 'def seq-eval-def [[_ def-name & def-bodies]]
+(defmethod seq->eval-node 'def seq-eval-def [&a [_ def-name & def-bodies]]
   (let [[docstring def-value] (if (= 2 (count def-bodies))
                                 def-bodies
                                 [nil (first def-bodies)])
-        value-node (->eval-node def-value)]
+        value-node (->eval-node &a def-value)]
     (gen-eval-node (intern *ns* def-name (evalme value-node &b)))))
 
 (defmethod seq->eval-node 'case* seq-eval-case
-  [[_ value shift mask default-value imap switch-type mode skip-check :as form]]
+  [&a [_ value shift mask default-value imap switch-type mode skip-check :as form]]
   ;; (case* ~ge ~shift ~mask ~default ~imap ~switch-type :int)
   ;; switch-type: sparse vs compact
   ;; mode: ints hashes identity
@@ -237,10 +224,11 @@
   ;; - hash-equiv: objects
   (let [imap (zipmap (keys imap)
                      (for [[h branch] (vals imap)]
-                       [h (->eval-node branch)]))
-        default-value (->eval-node default-value)]
+                       [h (->eval-node &a branch)]))
+        default-value (->eval-node &a default-value)
+        value-node    (->eval-node &a value)]
     (gen-eval-node
-     (let [ev (evalme value &b)
+     (let [ev (evalme value-node &b)
            eh (clojure.lang.Util/hash ev)
            th (if (zero? mask) eh (bit-and (bit-shift-right eh shift) mask))]
        (if-let [[h branch] (get imap th)]
@@ -251,8 +239,8 @@
            (evalme branch &b))
          (evalme default-value &b))))))
 
-(defmethod seq->eval-node 'do seq-eval-do [[_ & bodies]]
-  (let [bodies (map ->eval-node bodies)]
+(defmethod seq->eval-node 'do seq-eval-do [&a [_ & bodies]]
+  (let [bodies (map (partial ->eval-node &a) bodies)]
     (case (count bodies)
       0 nil
       1 (first bodies)
@@ -270,34 +258,39 @@
          (do (doseq [x butlast-body] (evalme x &b))
              (evalme last-body &b)))))))
 
-(defmethod seq->eval-node 'letfn* seq-eval-letfn [[_ bindings & bodies :as form]]
-  (let [bindings (for [[k v] (partition 2 bindings)]
-                   [k (seq->eval-node v) (promise)])
+
+(defmethod seq->eval-node 'letfn* seq-eval-letfn [&a [_ bindings & bodies :as form]]
+  (let [&a (into &a (for [k (take-nth 2 bindings)] [k ::letfn-binding]))
+        bindings (for [[k v] (partition 2 bindings)]
+                   [k (seq->eval-node &a v) (promise)])
         letfn-bindings (into {} (for [[k v p] bindings]
                                   [k (fn [& x] (apply @p x))]))
-        body-node (->eval-node (list* 'do bodies))]
+        body-node (->eval-node &a (list* 'do bodies))]
     (gen-eval-node
      (let [&b (merge &b letfn-bindings)]
        (doseq [[k v p] bindings]
          (deliver p (evalme v &b)))
        (evalme body-node &b)))))
 
-(defmethod seq->eval-node 'fn* seq-eval-fn [form]
-  (let [[fname & bodies] (parsed-fn form)
-        rest-def (first (filter (fn [[args]] (some #{'&} args)) bodies))
+(defmethod seq->eval-node 'fn* seq-eval-fn [&a form]
+  (let [[fname & bodies]      (parsed-fn form)
+        &a                    (if fname (assoc &a fname ::fn-name-binding) &a)
+        rest-def              (first (filter (fn [[args]] (some #{'&} args)) bodies))
         rest-def-butlast-args (drop-last 2 (first rest-def))
         rest-def-last-arg     (last (first rest-def))
         rest-def-bodies       (next rest-def)
-        rest-node             (->eval-node (list* 'do rest-def-bodies))
+        rest-node             (->eval-node (into &a (for [k (cons rest-def-last-arg rest-def-butlast-args)]
+                                                      [k ::fn-arg-binding]))
+                                           (list* 'do rest-def-bodies))
         bodies (remove #{rest-def} bodies)
         arity->args      (reduce (fn [m [args]] (assoc m (count args) args))
                                  {} bodies)
-        arity->body-node (reduce (fn [m [args & bodies :as def]]
-                                   (assoc m (count args) (->eval-node (list* 'do bodies))))
-                                 (if rest-def-bodies
-                                   {:variadic (->eval-node (list* 'do rest-def-bodies))}
-                                   {})
-                                 bodies)
+        arity->body-node  (into (if rest-def-bodies
+                                  {:variadic (->eval-node &a (list* 'do rest-def-bodies))}
+                                  {})
+                                (for [[args & bodies :as def] bodies
+                                      :let [&a (into &a (for [k args] [k ::fn-arg-binding]))]]
+                                  [(count args) (->eval-node &a (list* 'do bodies))]))
         arity->def (reduce (fn [m [args & bodies :as def]]
                              (assoc m (count args) def)) {} bodies)]
     (cond
@@ -370,20 +363,25 @@
              (recur (:bindings call-result))
              call-result)))))))
 
-(defmethod seq->eval-node 'let* seq-eval-let [[_ bindings & bodies]]
+(defmethod seq->eval-node 'let* seq-eval-let [&a [_ bindings & bodies]]
   (cond
     ;; can merge (let*) forms
     (and (= 1 (count bodies)) (seq? (first bodies)) (= 'let* (ffirst bodies)))
-    (recur (list* 'let*
-                   (into bindings (second (first bodies)))
-                   (nnext (first bodies))))
+    (recur &a (list* 'let*
+                      (into bindings (second (first bodies)))
+                      (nnext (first bodies))))
 
     :else
-    (let [body-node (seq->eval-node (list* 'do bodies))
-          let-pairs (for [[k v] (partition 2 bindings)
-                          :when (not (and (= '_ k) (seq? v) (= 'clojure.core/nth (first v))))]
-                      [k (->eval-node v)])
-          [[k1 b1] [k2 b2] [k3 b3] [k4 b4] [k5 b5] [k6 b6] [k7 b7]] (doall let-pairs)]
+    (let [[&a let-pairs]
+          (loop [&a &a
+                 let-pairs []
+                 [k v & bindings] bindings]
+            (cond (nil? k) [&a let-pairs]
+                  :else    (recur (assoc &a k ::let-binding)
+                                  (conj let-pairs [k (->eval-node &a v)])
+                                  bindings)))
+          [[k1 b1] [k2 b2] [k3 b3] [k4 b4] [k5 b5] [k6 b6] [k7 b7]] (doall let-pairs)
+          body-node (seq->eval-node &a (list* 'do bodies))]
       (case (count bindings)
         0 body-node
         2 (gen-eval-node (evalme body-node (assoc &b k1 (evalme b1 &b))))
@@ -442,11 +440,15 @@
                                    &b let-pairs)))))))
 
 ;; TODO: need to build
-(defmethod seq->eval-node 'loop* seq-eval-loop [[_ bindings & bodies]]
+(defmethod seq->eval-node 'loop* seq-eval-loop [&a [_ bindings & bodies]]
   (assert (even? (count bindings)))
-  (let [bindings (for [[k v] (partition 2 bindings)]
-                   [k (->eval-node v)])
-        body-node (seq->eval-node (list* 'do bodies))]
+  (let [[&a bindings]
+        (loop [&a &a, let-pairs [], [k v & bindings] bindings]
+          (cond (nil? k) [&a let-pairs]
+                :else    (recur (assoc &a k ::let-binding)
+                                (conj let-pairs [k (->eval-node &a v)])
+                                bindings)))
+        body-node (seq->eval-node &a (list* 'do bodies))]
     (case (count bindings)
       1
       (let [[[k v]] bindings]
@@ -467,21 +469,21 @@
              (recur (into &b (zipmap (map first bindings) (:bindings last-res))))
              last-res)))))))
 
-(defmethod seq->eval-node 'new seq-eval-new [[_ class-name & args]]
+(defmethod seq->eval-node 'new seq-eval-new [&a [_ class-name & args]]
   (let [clz (symbol->class class-name)
         _   (assert clz (str "Unexpected class name: " class-name))
-        args (mapv ->eval-node args)]
+        [arg0 :as args] (map (partial ->eval-node &a) args)]
     (case class-name
       ;; inline direct calls
-      clojure.lang.LazySeq (gen-eval-node (new clojure.lang.LazySeq (evalme (first args) &b)))
+      clojure.lang.LazySeq (gen-eval-node (new clojure.lang.LazySeq (evalme arg0 &b)))
 
       ;; else
       (gen-eval-node
        (let [args (for [a args] (evalme a &b))]
          (clojure.lang.Reflector/invokeConstructor clz (into-array Object args)))))))
 
-(defmethod seq->eval-node 'recur seq-eval-recur [[_ & values]]
-  (let [nodes (mapv ->eval-node values)
+(defmethod seq->eval-node 'recur seq-eval-recur [&a [_ & values]]
+  (let [nodes (mapv (partial ->eval-node &a) values)
         size  (count nodes)
         cache (object-array size)] ;; TODO: cache is not thread-safe!
     (gen-eval-node
@@ -491,26 +493,26 @@
              (recur (inc i)))
          (->Recur cache))))))
 
-(defmethod seq->eval-node 'throw [[_ e :as form]]
+(defmethod seq->eval-node 'throw [&a [_ e :as form]]
   (assert (= 2 (count form)))
   (assert (or (symbol? e) (seq? e)))
-  (let [e (->eval-node e)]
+  (let [e (->eval-node &a e)]
     (gen-eval-node (throw (evalme e &b)))))
 
-(defmethod seq->eval-node 'clojure.core/eval [[_ e]]
-  (let [e (->eval-node e)]
+(defmethod seq->eval-node 'clojure.core/eval [&a [_ e]]
+  (let [e (->eval-node &a e)]
     (gen-eval-node (-> e (evalme &b) (evalme nil)))))
 
-(defmethod seq->eval-node 'var [[_ x]]
+(defmethod seq->eval-node 'var [&a [_ x]]
   (let [x (resolve x)] ;; TODO!
     (assert x (str "Unable to resolve var: " x "in this context"))
     (gen-eval-node x)))
 
-(defmethod seq->eval-node '. [[_ target field & args]]
+(defmethod seq->eval-node '. [&a [_ target field & args]]
 
   ;; TODO: how is it possible that symbol is already resolved to Class here?
   (let [[field args] (if (seq? field) [(first field) (next field)] [field args])]
-    (let [[arg1 arg2 arg3 :as args] (map ->eval-node args)]
+    (let [[arg1 arg2 arg3 :as args] (map (partial ->eval-node &a) args)]
       (if-let [target-class (cond (class? target) target
                                   (and (symbol? target) (class? (resolve target))) (resolve target))]
         ;; static invocation
@@ -521,7 +523,7 @@
           ^objects (into-array Object (for [a args] (evalme a &b)))))
 
         ;; instance invocation
-        (let [target (->eval-node target)]
+        (let [target (->eval-node &a target)]
           (case field
             nth ;; very common in let* forms
             (gen-eval-node (nth (evalme target &b) (evalme arg1 &b) (evalme arg2 &b)))
@@ -537,8 +539,8 @@
 (declare expand-and-eval)
 
 (doseq [lf '[in-ns clojure.core/in-ns]]
-  (defmethod seq->eval-node lf [[_ nssym]]
-    (let [sym-node (->eval-node nssym)]
+  (defmethod seq->eval-node lf [&a [_ nssym]]
+    (let [sym-node (->eval-node &a nssym)]
       (gen-eval-node
        (let [new-ns (create-ns (evalme sym-node &b))]
          ; (println :>! new-ns)
@@ -551,28 +553,28 @@
              (.doReset (var *ns*) new-ns))))))))
 
 (doseq [lf '[clojure.core/load-file load-file]]
-  (defmethod seq->eval-node lf [[_ fname]]
-    (let [arg (->eval-node fname)]
+  (defmethod seq->eval-node lf [&a [_ fname]]
+    (let [arg (->eval-node &a fname)]
       (gen-eval-node
        (with-open [in (new java.io.PushbackReader (io/reader (io/file (evalme arg &b))))]
          (doseq [read (repeatedly #(read {:eof ::eof} in))
                  :while (not= ::eof read)]
            (expand-and-eval read)))))))
 
-(defmethod seq->eval-node 'clojure.core/with-loading-context [[_ & bodies]]
+(defmethod seq->eval-node 'clojure.core/with-loading-context [&a [_ & bodies]]
   ;; needed by (ns) forms
-  (seq->eval-node (list* 'do bodies)))
+  (seq->eval-node &a (list* 'do bodies)))
 
-(defmethod seq->eval-node 'try [[_ & xs]]
+(defmethod seq->eval-node 'try [&a [_ & xs]]
   (let [catch-clauses  (keep (fn [x] (when (and (seq? x) (= 'catch (first x)))
                                        [(resolve (nth x 1)) ;; type
                                         (nth x 2) ;; variable
-                                        (->eval-node (list* 'do (nthrest x 2)))]))
+                                        (->eval-node (assoc &a (nth x 2) ::catch-var-binding) (list* 'do (nthrest x 2)))]))
                              xs)
         bodies         (remove (fn [x] (and (seq? x) ('#{finally catch} (first x)))) xs)
-        body-node (seq->eval-node (list* 'do bodies))
+        body-node (seq->eval-node &a (list* 'do bodies))
         finally-node (some (fn [x] (when (and (seq? x) (= 'finally (first x)))
-                                     (->eval-node (list* 'do (next x))))) xs)]
+                                     (->eval-node &a (list* 'do (next x))))) xs)]
     (gen-eval-node
      (try (evalme body-node &b)
           (catch Throwable t
@@ -581,23 +583,29 @@
               (throw t)))
           (finally (evalme finally-node &b))))))
 
-(defn sym->eval-node [expr]
-  (if (var? (resolve expr))
-    (let [s @(resolve expr)] (gen-eval-node s))
-    expr))
+(defn sym->eval-node [&a expr]
+  (if (contains? &a expr)
+    (gen-eval-node (get &b expr))
+    (if (var? (resolve expr))
+      (let [s @(resolve expr)] (gen-eval-node s))
+      (if-let [parent (some-> expr namespace symbol resolve)]
+        (if (class? parent)
+          (gen-eval-node (clojure.lang.Reflector/getStaticField ^Class parent (name expr)))
+          (throw (ex-info "Cannot access symbol!" {:symbol expr})))
+        (throw (ex-info "Cannot resolve symbol!" {:symbol expr}))))))
 
-(defn ->eval-node [expr]
-  (cond (seq? expr)  (seq->eval-node expr)
-        (map? expr)  (persistent! (reduce-kv (fn [a k v] (assoc! a (->eval-node k) (->eval-node v))) (transient (empty expr))  expr))
-        (coll? expr) (into (empty expr) (map ->eval-node expr))
+(defn ->eval-node [&a expr]
+  (cond (seq? expr)  (seq->eval-node &a expr)
+        (map? expr)  (persistent! (reduce-kv (fn [a k v] (assoc! a (->eval-node &a k) (->eval-node &a v))) (transient (empty expr))  expr))
+        (coll? expr) (into (empty expr) (map (partial ->eval-node &a) expr))
 
         ;; TODO: statically lookup common core symbols! check that symbol is not yet bound!!!!!
-        (symbol? expr) (sym->eval-node expr)
+        (symbol? expr) (sym->eval-node &a expr)
         :else expr))
 
 (defn expand-and-eval [expr]
   (let [expanded (macroexpand-all-code expr)
-        node     (->eval-node expanded)]
+        node     (->eval-node {} expanded)]
     ; (println :> expanded)
     (evalme node basic-bindings)))
 

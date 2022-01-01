@@ -6,7 +6,9 @@
   (is (= :a (evaluator '(let [] :b :a))))
   (is (= nil (evaluator '(let [a 1]))))
   (is (= 1 (evaluator '(let [a 1 b a] b))))
-  (is (= 4 (evaluator '(let [a 2 b 3] (let [a 1] (+ a b)))))))
+  (is (= 4 (evaluator '(let [a 2 b 3] (let [a 1] (+ a b))))))
+  (testing "Shadow lexical bindings"
+    (is (= 4 (evaluator '(let [inc dec] (inc 5)))))))
 
 (deftest test-eval-try
   (is (= 2 (evaluator '(try 1 2 (finally 3)))))
@@ -50,13 +52,20 @@
       (is (= "f" (evaluator '(. "asdf" substring 3))))
       (is (= "f" (evaluator '(. "asdf" (substring 3))))))))
 
-(deftest test-letfn
+(deftest test-letfn-form
   (is (= 1
          (evaluator
           '(letfn [(collatz [n] (cond (= 1 n) 1 (even? n) (div2 n) (odd? n) (add3 n)))
                    (div2 [x] (collatz (/ x 2)))
                    (add3 [x] (collatz (+ 1 (* 3 x))))]
-             (collatz 12))))))
+             (collatz 12)))))
+  (testing "shadowed lexical binding"
+    (is (= 4 (evaluator '(letfn [(inc [x] (dec x))] (inc 5)))))
+    (is (= 4 (evaluator '(letfn [(a [x] (inc x)) (inc [x] (dec x))] (a 5)))))))
+
+(deftest test-loop-form
+  (testing "Bindings are like with let"
+    (is (= 2 (evaluator '(loop [i 1 j (inc i)] j))))))
 
 (deftest test-case
   ;; (is (= :one (evaluator '(case 1 1 :one 2 :two 3 :three 4))))
