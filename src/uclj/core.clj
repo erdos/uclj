@@ -30,6 +30,16 @@
         ;[clojure.zip :as zip]
         ])
 
+(defmacro template [expr]
+  (letfn [(unroll [expr] (cond (seq? expr) (unroll-seq expr)
+                               (vector? expr) [(vec (mapcat unroll expr))]
+                               :else [expr]))
+          (unroll-seq [[t s :as expr]]
+            (cond ('#{clojure.core/unquote-splicing} t) (eval s)
+                  ('#{clojure.core/unquote} t)          [(eval s)]
+                  :else                                 [(mapcat unroll expr)]))]
+    (first (unroll expr))))
+
 (defn symbol->class [sym]
   (assert (symbol? sym))
   (doto (ns-resolve *ns* sym)
@@ -184,18 +194,13 @@
   (let [[f & args] (map (partial ->eval-node &a) s)
         [a1 a2 a3 a4 a5 a6 a7] args]
     (dorun args)
-    (case (count args)
-      0 (gen-eval-node (.invoke ^clojure.lang.IFn (evalme f &b)))
-      1 (gen-eval-node (.invoke ^clojure.lang.IFn (evalme f &b) (evalme a1 &b)))
-      2 (gen-eval-node (.invoke ^clojure.lang.IFn (evalme f &b) (evalme a1 &b) (evalme a2 &b)))
-      3 (gen-eval-node (.invoke ^clojure.lang.IFn (evalme f &b) (evalme a1 &b) (evalme a2 &b) (evalme a3 &b)))
-      4 (gen-eval-node (.invoke ^clojure.lang.IFn (evalme f &b) (evalme a1 &b) (evalme a2 &b) (evalme a3 &b) (evalme a4 &b)))
-      5 (gen-eval-node (.invoke ^clojure.lang.IFn (evalme f &b) (evalme a1 &b) (evalme a2 &b) (evalme a3 &b) (evalme a4 &b) (evalme a5 &b)))
-      6 (gen-eval-node (.invoke ^clojure.lang.IFn (evalme f &b) (evalme a1 &b) (evalme a2 &b) (evalme a3 &b) (evalme a4 &b) (evalme a5 &b) (evalme a6 &b)))
-      7 (gen-eval-node (.invoke ^clojure.lang.IFn (evalme f &b) (evalme a1 &b) (evalme a2 &b) (evalme a3 &b) (evalme a4 &b) (evalme a5 &b) (evalme a6 &b) (evalme a7 &b)))
-
-      ;; else
-      (gen-eval-node (apply (evalme f &b) (for [e args] (evalme e &b)))))))
+    (template
+     (case (count args)
+       ~@(for [i (range 8)]
+           [i (list 'gen-eval-node (list* '.invoke '(do ^clojure.lang.IFn (evalme f &b))
+                                           (for [j (range 1 (inc i))] (list 'evalme (symbol (str 'a j)) '&b))))])
+       ;; else
+       (gen-eval-node (apply (evalme f &b) (for [e args] (evalme e &b))))))))
 
 (defmethod seq->eval-node 'quote seq-eval-quote [&a [_ quoted]] (gen-eval-node quoted))
 
@@ -362,16 +367,6 @@
            (if (instance? Recur call-result)
              (recur (:bindings call-result))
              call-result)))))))
-
-(defmacro template [expr]
-  (letfn [(unroll [expr] (cond (seq? expr) (unroll-seq expr)
-                               (vector? expr) [(vec (mapcat unroll expr))]
-                               :else [expr]))
-          (unroll-seq [[t s :as expr]]
-            (cond ('#{clojure.core/unquote-splicing} t) (eval s)
-                  ('#{clojure.core/unquote} t)          [(eval s)]
-                  :else                                 [(mapcat unroll expr)]))]
-    (first (unroll expr))))
 
 (def ks+bs (for [i (range 16)] [(symbol (str 'k (inc i))) (symbol (str 'b (inc i)))]))
 
