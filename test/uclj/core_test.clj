@@ -52,6 +52,14 @@
       (is (= "f" (evaluator '(. "asdf" substring 3))))
       (is (= "f" (evaluator '(. "asdf" (substring 3))))))))
 
+(deftest test-fn-form
+  (testing "Functin handle is bound"
+    (is (fn? (evaluator '((fn f [a] f) 3)))))
+  (testing "Returns argument"
+    (is (= 1 (evaluator '((fn [a] a) 1))))
+    (is (= 1 (evaluator '((fn [a b] a) 1 2))))
+    (is (= :a (evaluator '((fn [] :a)))))))
+
 (deftest test-letfn-form
   (is (= 1
          (evaluator

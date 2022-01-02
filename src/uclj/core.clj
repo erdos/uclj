@@ -40,6 +40,7 @@
                   :else                                 [(mapcat unroll expr)]))]
     (first (unroll expr))))
 
+;; resolves to class or nil or throws exception
 (defn symbol->class [sym]
   (assert (symbol? sym))
   (doto (ns-resolve *ns* sym)
@@ -300,75 +301,46 @@
                                   [(count args) (->eval-node &a (list* 'do bodies))]))
         arity->def (reduce (fn [m [args & bodies :as def]]
                              (assoc m (count args) def)) {} bodies)]
-    (cond
-      (and (not rest-def) (= 1 (count bodies)) (arity->args 0))
-      (let [body (arity->body-node 0)]
-        (gen-eval-node
-         (fn nullary []
-           (let [&b (if fname (assoc &b fname nullary) &b)
-                 call-result (evalme body &b)]
-             (if (instance? Recur call-result)
-               (recur)
-               call-result)))))
+    (template
+     (cond
+       ~@(mapcat seq
+                 (for [i (range 0 21)
+                       :let [fname (symbol (str 'fnarity i))
+                             many-vars (repeatedly i gensym)
+                             many-keys (repeatedly i gensym)]]
+                   [`(and (not ~'rest-def) (= 1 (count ~'bodies)) (~'arity->args ~i))
+                    `(let [[~@many-vars] (~'arity->args ~i)
+                           body#   (~'arity->body-node ~i)]
+                       (gen-eval-node
+                        (fn ~fname [~@many-keys]
+                          (let [~'&b (if ~'fname (assoc ~'&b ~'fname ~(symbol (str 'fnarity i))) ~'&b)
+                                ~'&b ~(if (zero? i)
+                                        '&b
+                                          (list* 'assoc '&b (interleave many-vars many-keys)))
+                                call-result# (evalme body# ~'&b)]
+                            (if (instance? Recur call-result#)
+                              (let [[~@many-vars] (:bindings call-result#)]
+                                (recur ~@many-vars))
+                              call-result#)))))]))
 
-      (and (not rest-def) (= 1 (count bodies)) (arity->args 1))
-      (let [a1name (first (arity->args 1))
-            body   (arity->body-node 1)]
-        (gen-eval-node
-         (fn unary [a]
-           (let [&b (if fname (assoc &b fname unary) &b)
-                 &b (assoc &b a1name a)
-                 call-result (evalme body &b)]
-             (if (instance? Recur call-result)
-               (recur (first (:bindings call-result)))
-               call-result)))))
-
-      (and (not rest-def) (= 1 (count bodies)) (arity->args 3))
-      (let [[a1name a2name a3name] (arity->args 3)
-            body   (arity->body-node 3)
-            third (fn [[_ _ x]] x)]
-        (gen-eval-node
-         (fn ternary [a1 a2 a3]
-           (let [&b (if fname (assoc &b fname ternary) &b)
-                 &b (assoc &b a1name a1 a2name a2 a3name a3)
-                 call-result (evalme body &b)]
-             (if (instance? Recur call-result)
-               (let [[a b c] (:bindings call-result)]
-                 (recur a b c))
-               call-result)))))
-
-      (and (not rest-def) (= 1 (count bodies)) (arity->args 4))
-      (let [[a1name a2name a3name a4name] (arity->args 4)
-            body   (arity->body-node 4)]
-        (gen-eval-node
-         (fn quaternary [a1 a2 a3 a4]
-           (let [&b (if fname (assoc &b fname quaternary) &b)
-                 &b (assoc &b a1name a1 a2name a2 a3name a3 a4name a4)
-                 call-result (evalme body &b)]
-             (if (instance? Recur call-result)
-               (let [[a b c d] (:bindings call-result)]
-                 (recur a b c d))
-               call-result)))))
-
-
-      :else
-      (gen-eval-node
-       (fn f [& call-args]
-         (let [&b (if fname (assoc &b fname f) &b)
-               call-result
-               (let [c (count call-args)] ;; TODO: can it be infinite?
-                 (if-let [[args] (arity->def c)]
-                   (let [&b (into &b (map vector args call-args))]
-                     (evalme (arity->body-node c) &b))
-                   (if rest-def ;; not node, that can be null also
-                     (-> &b
-                         (into (zipmap rest-def-butlast-args call-args))
-                         (assoc rest-def-last-arg (drop (count rest-def-butlast-args) call-args))
-                         (->> (evalme rest-def)))
-                     (assert false "Called with unexpected arity!"))))]
-           (if (instance? Recur call-result)
-             (recur (:bindings call-result))
-             call-result)))))))
+       :else
+       (gen-eval-node
+        (fn f [& call-args]
+          (let [&b (if fname (assoc &b fname f) &b)
+                call-result
+                (let [c (count call-args)] ;; TODO: can it be infinite?
+                  (if-let [[args] (arity->def c)]
+                    (let [&b (into &b (map vector args call-args))]
+                      (evalme (arity->body-node c) &b))
+                    (if rest-def ;; not node, that can be null also
+                      (-> &b
+                          (into (zipmap rest-def-butlast-args call-args))
+                          (assoc rest-def-last-arg (drop (count rest-def-butlast-args) call-args))
+                          (->> (evalme rest-def)))
+                      (assert false "Called with unexpected arity!"))))]
+            (if (instance? Recur call-result)
+              (recur (:bindings call-result))
+              call-result))))))))
 
 (def ks+bs (for [i (range 16)] [(symbol (str 'k (inc i))) (symbol (str 'b (inc i)))]))
 
