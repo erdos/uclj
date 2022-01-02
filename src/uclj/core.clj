@@ -363,6 +363,18 @@
              (recur (:bindings call-result))
              call-result)))))))
 
+(defmacro template [expr]
+  (letfn [(unroll [expr] (cond (seq? expr) (unroll-seq expr)
+                               (vector? expr) [(vec (mapcat unroll expr))]
+                               :else [expr]))
+          (unroll-seq [[t s :as expr]]
+            (cond ('#{clojure.core/unquote-splicing} t) (eval s)
+                  ('#{clojure.core/unquote} t)          [(eval s)]
+                  :else                                 [(mapcat unroll expr)]))]
+    (first (unroll expr))))
+
+(def ks+bs (for [i (range 16)] [(symbol (str 'k (inc i))) (symbol (str 'b (inc i)))]))
+
 (defmethod seq->eval-node 'let* seq-eval-let [&a [_ bindings & bodies]]
   (cond
     ;; can merge (let*) forms
@@ -380,64 +392,26 @@
                   :else    (recur (assoc &a k ::let-binding)
                                   (conj let-pairs [k (->eval-node &a v)])
                                   bindings)))
-          [[k1 b1] [k2 b2] [k3 b3] [k4 b4] [k5 b5] [k6 b6] [k7 b7]] (doall let-pairs)
           body-node (seq->eval-node &a (list* 'do bodies))]
-      (case (count bindings)
-        0 body-node
-        2 (gen-eval-node (evalme body-node (assoc &b k1 (evalme b1 &b))))
-
-        4 (gen-eval-node
-           (let [&b (assoc &b k1 (evalme b1 &b))
-                 &b (assoc &b k2 (evalme b2 &b))]
-             (evalme body-node &b)))
-
-        6 (gen-eval-node
-           (let [&b (assoc &b k1 (evalme b1 &b))
-                 &b (assoc &b k2 (evalme b2 &b))
-                 &b (assoc &b k3 (evalme b3 &b))]
-             (evalme body-node &b)))
-
-        8 (gen-eval-node
-           (let [&b (assoc &b k1 (evalme b1 &b))
-                 &b (assoc &b k2 (evalme b2 &b))
-                 &b (assoc &b k3 (evalme b3 &b))
-                 &b (assoc &b k4 (evalme b4 &b))]
-             (evalme body-node &b)))
-
-        10 (gen-eval-node
-            (let [&b (assoc &b k1 (evalme b1 &b))
-                  &b (assoc &b k2 (evalme b2 &b))
-                  &b (assoc &b k3 (evalme b3 &b))
-                  &b (assoc &b k4 (evalme b4 &b))
-                  &b (assoc &b k5 (evalme b5 &b))]
-              (evalme body-node &b)))
-
-        12 (gen-eval-node
-            (let [&b (assoc &b k1 (evalme b1 &b))
-                  &b (assoc &b k2 (evalme b2 &b))
-                  &b (assoc &b k3 (evalme b3 &b))
-                  &b (assoc &b k4 (evalme b4 &b))
-                  &b (assoc &b k5 (evalme b5 &b))
-                  &b (assoc &b k6 (evalme b6 &b))]
-              (evalme body-node &b)))
-
-        14 (gen-eval-node
-            (let [&b (assoc &b k1 (evalme b1 &b))
-                  &b (assoc &b k2 (evalme b2 &b))
-                  &b (assoc &b k3 (evalme b3 &b))
-                  &b (assoc &b k4 (evalme b4 &b))
-                  &b (assoc &b k5 (evalme b5 &b))
-                  &b (assoc &b k6 (evalme b6 &b))
-                  &b (assoc &b k7 (evalme b7 &b))]
-              (evalme body-node &b)))
-
-        ;; else TODO:
-        (gen-eval-node
-         (evalme body-node (reduce (fn [m [k v]]
-                                     (if (= k '_)
-                                       (do (evalme v m) m)
-                                       (assoc m k (evalme v m))))
-                                   &b let-pairs)))))))
+      (template
+       (let [~(vec ks+bs) (doall let-pairs)]
+         (case (count bindings)
+           0 body-node
+           ;; unroll for common arities!
+           ~@(mapcat seq (for [i (range 1 (inc (count ks+bs)))]
+                           [(* 2 i)
+                            `(gen-eval-node
+                              (let [~@(interleave
+                                       (repeat '&b)
+                                       (for [[k b] (take i ks+bs)]
+                                         (list 'assoc '&b k (list 'evalme b '&b))))]
+                                (evalme ~'body-node ~'&b)))]))
+           (gen-eval-node
+            (evalme body-node (reduce (fn [m [k v]]
+                                        (if (= k '_)
+                                          (do (evalme v m) m)
+                                          (assoc m k (evalme v m))))
+                                      &b let-pairs)))))))))
 
 ;; TODO: need to build
 (defmethod seq->eval-node 'loop* seq-eval-loop [&a [_ bindings & bodies]]
