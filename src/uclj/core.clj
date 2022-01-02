@@ -197,7 +197,7 @@
     (template
      (case (count args)
        ~@(for [i (range 8)]
-           [i (list 'gen-eval-node (list* '.invoke '(do ^clojure.lang.IFn (evalme f &b))
+           [i (list 'gen-eval-node (list* '.invoke (quote ^clojure.lang.IFn (evalme f &b))
                                            (for [j (range 1 (inc i))] (list 'evalme (symbol (str 'a j)) '&b))))])
        ;; else
        (gen-eval-node (apply (evalme f &b) (for [e args] (evalme e &b))))))))
@@ -245,23 +245,25 @@
          (evalme default-value &b))))))
 
 (defmethod seq->eval-node 'do seq-eval-do [&a [_ & bodies]]
-  (let [bodies (map (partial ->eval-node &a) bodies)]
-    (case (count bodies)
-      0 nil
-      1 (first bodies)
-      2 (let [[b1 b2] bodies]
-          (gen-eval-node (do (evalme b1 &b) (evalme b2 &b))))
-      3 (let [[b1 b2 b3] bodies]
-          (gen-eval-node (do (evalme b1 &b) (evalme b2 &b) (evalme b3 &b))))
-      4 (let [[b1 b2 b3 b4] bodies]
-          (gen-eval-node (do (evalme b1 &b) (evalme b2 &b) (evalme b3 &b) (evalme b4 &b))))
+  (let [bodies (map (partial ->eval-node &a) bodies)
+        [b1 b2 b3 b4 b5 b6 b7 b8 b9] bodies]
+    (template
+     (case (count bodies)
+       0 nil
+       1 (first bodies)
 
-      ;; else
-      (let [butlast-body (doall (butlast bodies))
-            last-body    (last bodies)]
-        (gen-eval-node
-         (do (doseq [x butlast-body] (evalme x &b))
-             (evalme last-body &b)))))))
+       ~@(mapcat seq
+                 (for [i (range 2 10)]
+                   [i (list 'gen-eval-node
+                             (list* 'do (for [j (range 1 (inc i))]
+                                          (list 'evalme (symbol (str 'b j)) '&b))))]))
+
+       ;; else
+       (let [butlast-body (doall (butlast bodies))
+             last-body    (last bodies)]
+         (gen-eval-node
+          (do (doseq [x butlast-body] (evalme x &b))
+              (evalme last-body &b))))))))
 
 
 (defmethod seq->eval-node 'letfn* seq-eval-letfn [&a [_ bindings & bodies :as form]]
@@ -575,7 +577,6 @@
 (defn expand-and-eval [expr]
   (let [expanded (macroexpand-all-code expr)
         node     (->eval-node {} expanded)]
-    ; (println :> expanded)
     (evalme node basic-bindings)))
 
 (def evaluator expand-and-eval)
