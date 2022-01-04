@@ -38,6 +38,23 @@
 
   )
 
+(defn unbound-var? [v] (and (var? v) (not (bound? v))))
+(defn unbound-value? [v] (instance? clojure.lang.Var$Unbound v))
+
+(deftest test-def
+  (testing "Def form declares var"
+    (is (unbound-var? (evaluator '(def a1))))
+    (is (thrown? Exception (evaluator '(if a (def a)))))
+    (is (unbound-value? (evaluator '(if (def bb) bb))))
+    (is (unbound-value? (evaluator '(if false (def cc) cc)))))
+  (testing "Defining var is being referenced"
+    (testing "Recursively defined list"
+      (is (var? (evaluator '(def onetwo (cons 1 (cons 2 (lazy-seq onetwo)))))))
+      (is (= [1 2 1] (evaluator '(take 3 onetwo)))))
+    (testing "Recursive function"
+      (is (var? (evaluator '(defn countdown [n] (if (zero? n) :none (countdown (dec n)))))))
+      (is (= :none (evaluator '(countdown 5)))))))
+
 (deftest test-interop
   (testing "constructor invocation"
     (is (= 12 (evaluator '(Integer. "12"))))

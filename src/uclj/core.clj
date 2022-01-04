@@ -217,8 +217,11 @@
   (let [[docstring def-value] (if (= 2 (count def-bodies))
                                 def-bodies
                                 [nil (first def-bodies)])
+        var-object ^clojure.lang.Var (intern *ns* def-name)
         value-node (->eval-node &a def-value)]
-    (gen-eval-node (intern *ns* def-name (evalme value-node &b)))))
+    (if (not-empty def-bodies)
+      (gen-eval-node (doto var-object (.bindRoot (evalme value-node &b))))
+      (gen-eval-node var-object))))
 
 (defmethod seq->eval-node 'case* seq-eval-case
   [&a [_ value shift mask default-value imap switch-type mode skip-check :as form]]
@@ -530,12 +533,14 @@
   (if (contains? &a expr)
     (gen-eval-node (get &b expr))
     (if (var? (resolve expr))
-      (let [s @(resolve expr)] (gen-eval-node s))
+      (if (bound? (resolve expr))
+        (let [s @(resolve expr)] (gen-eval-node s))
+        (gen-eval-node @(resolve expr))) ;; var was unbound at compile time so we need to deref in in runtime
       (if-let [parent (some-> expr namespace symbol resolve)]
         (if (class? parent)
           (gen-eval-node (clojure.lang.Reflector/getStaticField ^Class parent (name expr)))
-          (throw (ex-info "Cannot access symbol!" {:symbol expr})))
-        (throw (ex-info "Cannot resolve symbol!" {:symbol expr}))))))
+          (throw (ex-info (str "Cannot access symbol! " expr) {:symbol expr})))
+        (throw (ex-info (str "Cannot resolve symbol! " expr) {:symbol expr}))))))
 
 (defn ->eval-node [&a expr]
   (cond (seq? expr)  (seq->eval-node &a expr)
