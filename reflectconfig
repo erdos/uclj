@@ -31,6 +31,7 @@
     {"name": "java.util.concurrent.atomic.AtomicReferenceArray",
      "allDeclaredConstructors": true
     },
+    {"name": "java.lang.System", "methods": [{"name": "currentTimeMillis"}, {"name": "nanoTime"}]},
     {"name": "clojure.lang.LazySeq", "allDeclaredConstructors": true},
     {"name": "java.io.StringWriter",
      "allDeclaredConstructors": true,
