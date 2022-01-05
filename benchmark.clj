@@ -38,7 +38,8 @@
   (format "%d+%d" (Math/round mean) (Math/round stdev)))
 
 (defn pritems [& xs]
-  (apply printf (str (apply str (repeat (count xs) "%-20s")) "\n") xs))
+  (apply printf (str (apply str (repeat (count xs) "%-20s")) "\n") xs)
+  (flush))
 
 (apply pritems "test case" runners)
 
