@@ -4,8 +4,16 @@
 
 (def scripts-dir "/home/erdos/Work/advent-of-code/2021")
 
-(def script-files ["day1.clj" "day2.clj" "day3.clj" "day4.clj" "day5.clj" "day6.clj" #_"day7.clj" "day8.clj" "day9.clj"
-                   "day24.clj"])
+(def script-files
+  [["day1.clj" 5]
+   ["day2.clj" 5]
+   ["day3.clj" 5]
+   ["day4.clj" 2]
+   ["day5.clj" 2]
+   ["day6.clj" 2] #_"day7.clj"
+   ["day8.clj" 2]
+   ["day9.clj" 2]
+   ["day24.clj" 2]])
 
 (def runners ["uclj" "bb" "clojure"])
 
@@ -15,17 +23,28 @@
          after# (System/currentTimeMillis)]
      [result# (- after# before#)]))
 
-(apply println "test case" (interleave (repeat \tab) runners))
+(defn run-item! [runner file]
+  (doto (measure (sh runner (str scripts-dir "/" file) :dir scripts-dir))
+    (-> first :exit zero? assert)))
 
-(doseq [file script-files]
-  (apply println
-         file
-         (interleave (repeat \tab)
-                     (for [runner runners]
-                       (let [[result runtime] (measure (sh
-                                                        runner
-                                                        (str scripts-dir "/" file)
-                                                        :dir scripts-dir))]
-                         (assert (zero? (:exit result)) (str "Error " (pr-str result)))
-                         #_(println " - Runtime was" runtime "ms")
-                         runtime)))))
+(defn stats [numbers]
+  (let [n     (count numbers)
+        mean  (double (/ (reduce + numbers) n))
+        stdev (Math/sqrt (/ (reduce + (for [a numbers] (Math/pow (- mean a) 2)))
+                            (dec n)))]
+    [mean stdev]))
+
+(defn format-stat [[mean stdev]]
+  (format "%d+%d" (Math/round mean) (Math/round stdev)))
+
+(defn pritems [& xs]
+  (apply printf (str (apply str (repeat (count xs) "%-20s")) "\n") xs))
+
+(apply pritems "test case" runners)
+
+(doseq [[file repeat-count] script-files]
+  (apply pritems file
+         (for [runner runners]
+           (format-stat (stats (repeatedly repeat-count #(second (run-item! runner file))))))))
+
+(shutdown-agents)
