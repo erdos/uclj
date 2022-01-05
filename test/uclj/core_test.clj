@@ -41,6 +41,10 @@
 (defn unbound-var? [v] (and (var? v) (not (bound? v))))
 (defn unbound-value? [v] (instance? clojure.lang.Var$Unbound v))
 
+(deftest test-call-binary
+  (is (= 23 (evaluator '(+ 20 3))))
+  )
+
 (deftest test-def
   (testing "Def form declares var"
     (is (unbound-var? (evaluator '(def a1))))

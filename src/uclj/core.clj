@@ -184,24 +184,44 @@
   clojure.lang.IPersistentSet    (evalme [s b] (into (empty s) (for [x s] (evalme x b)))))
 
 ;; TODO: test with interfaces instead of protocols!
-(defmacro gen-eval-node [body]
-  `(reify EvalNode
-     (evalme [_ ~'&b] ~body)))
+(defmacro gen-eval-node
+  ([m body] `(with-meta (gen-eval-node ~body) ~m))
+  ([body] `(reify EvalNode (evalme [_ ~'&b] ~body))))
 
 (declare ->eval-node)
 
 (defmulti seq->eval-node (fn [&a form] (first form)) :default ::default)
+
+;; generate the following map in compile-time:
+;; - keys are vars that bind to functions with 2 arity.
+;; - values are functions that take 2 arguments as return an eval-node.
+;; it is used for inlining common function calls.
+(def clojure-core-binary-fns
+  (template
+   (hash-map
+    ~@(mapcat seq
+              (for [v (vals (ns-publics 'clojure.core))
+                    :when (not= #'clojure.core/aget v)
+                    :when (not (:macro (meta v)))
+                    :when (some (fn [a] (or (and (= 2 (count a)) (not= '& (first a)))
+                                            (some #{'&} (take 3 a))))
+                                (:arglists (meta v)))]
+                [v (list 'fn* '[a b] (list 'gen-eval-node (list (symbol v) '(evalme a &b) '(evalme b &b))))])))))
+
 (defmethod seq->eval-node ::default seq-eval-call [&a s]
   (let [[f & args] (map (partial ->eval-node &a) s)
         [a1 a2 a3 a4 a5 a6 a7] args]
     (dorun args)
-    (template
-     (case (count args)
-       ~@(for [i (range 8)]
-           [i (list 'gen-eval-node (list* '.invoke (quote ^clojure.lang.IFn (evalme f &b))
-                                           (for [j (range 1 (inc i))] (list 'evalme (symbol (str 'a j)) '&b))))])
-       ;; else
-       (gen-eval-node (apply (evalme f &b) (for [e args] (evalme e &b))))))))
+    (if-let [call-factory (when (= 2 (count args))
+                            (clojure-core-binary-fns (::var (meta f))))]
+      (call-factory a1 a2)
+      (template
+       (case (count args)
+         ~@(for [i (range 8)]
+             [i (list 'gen-eval-node (list* '.invoke (quote ^clojure.lang.IFn (evalme f &b))
+                                             (for [j (range 1 (inc i))] (list 'evalme (symbol (str 'a j)) '&b))))])
+         ;; else
+         (gen-eval-node (apply (evalme f &b) (for [e args] (evalme e &b)))))))))
 
 (defmethod seq->eval-node 'quote seq-eval-quote [&a [_ quoted]] (gen-eval-node quoted))
 
@@ -533,9 +553,10 @@
   (if (contains? &a expr)
     (gen-eval-node (get &b expr))
     (if (var? (resolve expr))
+      ;; TODO: kicsit sok a resolve!
       (if (bound? (resolve expr))
-        (let [s @(resolve expr)] (gen-eval-node s))
-        (gen-eval-node @(resolve expr))) ;; var was unbound at compile time so we need to deref in in runtime
+        (let [s @(resolve expr)] (gen-eval-node {::var (resolve expr)} s))
+        (gen-eval-node {::unbound-var (resolve expr)} @(resolve expr))) ;; var was unbound at compile time so we need to deref in in runtime
       (if-let [parent (some-> expr namespace symbol resolve)]
         (if (class? parent)
           (gen-eval-node (clojure.lang.Reflector/getStaticField ^Class parent (name expr)))
