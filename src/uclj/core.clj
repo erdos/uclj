@@ -318,6 +318,8 @@
          (deliver p (evalme v &b)))
        (evalme body-node &b)))))
 
+(def ^:private kvs-seq (repeatedly #(vector (gensym "k") (gensym "v"))))
+
 (defmethod seq->eval-node 'fn* seq-eval-fn [&a form]
   (let [[fname & bodies]      (parsed-fn form)
         &a                    (if fname (assoc &a fname ::fn-name-binding) &a)
@@ -344,8 +346,8 @@
        ~@(mapcat seq
                  (for [i (range 0 21)
                        :let [fname (symbol (str 'fnarity i))
-                             many-vars (repeatedly i gensym)
-                             many-keys (repeatedly i gensym)]]
+                             many-vars (map first (take i kvs-seq))
+                             many-keys (map second (take i kvs-seq))]]
                    [`(and (not ~'rest-def) (= 1 (count ~'bodies)) (~'arity->args ~i))
                     `(let [[~@many-vars] (~'arity->args ~i)
                            body#   (~'arity->body-node ~i)]
@@ -420,7 +422,6 @@
                                           (assoc m k (evalme v m))))
                                       &b let-pairs)))))))))
 
-;; TODO: need to build
 (defmethod seq->eval-node 'loop* seq-eval-loop [&a [_ bindings & bodies]]
   (assert (even? (count bindings)))
   (let [[&a bindings]
@@ -430,45 +431,21 @@
                                 (conj let-pairs [k (->eval-node &a v)])
                                 bindings)))
         body-node (seq->eval-node &a (list* 'do bodies))]
-    (case (count bindings)
-      0
-      (gen-eval-node
-       (loop []
-         (let [last-res (evalme body-node &b)]
-           (if (instance? Recur last-res)
-             (recur)
-             last-res))))
-
-      1
-      (let [[[k v]] bindings]
-        (gen-eval-node
-         (loop [&b (assoc &b k (evalme v &b))]
-           (let [last-res (evalme body-node &b)]
-             (if (instance? Recur last-res)
-               (recur (assoc &b k (first (:bindings last-res))))
-               last-res)))))
-
-      2
-      (let [[[k1 v1] [k2 v2]] bindings]
-        (gen-eval-node
-         (loop [&b (as-> &b &b
-                     (assoc &b k1 (evalme v1 &b))
-                     (assoc &b k2 (evalme v2 &b)))]
-           (let [last-res (evalme body-node &b)]
-             (if (instance? Recur last-res)
-               (let [[v1 v2] (:bindings last-res)]
-                 (recur (assoc &b k1 v1 k2 v2)))
-               last-res)))))
-
-      ;; else
-      (gen-eval-node
-       (loop [&b (reduce (fn [&b [k v]]
-                           (assoc &b k (evalme v &b)))
-                         &b bindings)]
-         (let [last-res (evalme body-node &b)]
-           (if (instance? Recur last-res)
-             (recur (into &b (zipmap (map first bindings) (:bindings last-res))))
-             last-res)))))))
+    (template
+     (case (count bindings)
+       ~@(mapcat seq
+                 (for [i (range 20)]
+                   [i
+                    `(let [[~@(take i kvs-seq)] ~'bindings]
+                       (gen-eval-node
+                        (loop [~'&b (as-> ~'&b ~'&b
+                                      ~@(for [[k v] (take i kvs-seq)]
+                                          (list 'assoc '&b k (list 'evalme v '&b))))]
+                          (let [last-res# (evalme ~'body-node ~'&b)]
+                            (if (instance? Recur last-res#)
+                              (let [[~@(mapv second (take i kvs-seq))] (:bindings last-res#)]
+                                (recur ~(if (zero? i) '&b (list* 'assoc '&b, (flatten (take i kvs-seq))))))
+                              last-res#)))))]))))))
 
 (defmethod seq->eval-node 'new seq-eval-new [&a [_ class-name & args]]
   (let [clz (symbol->class class-name)
