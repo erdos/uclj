@@ -12,23 +12,25 @@
    'clojure.lang.LazySeq clojure.lang.LazySeq
    'java.util.concurrent.atomic.AtomicReferenceArray java.util.concurrent.atomic.AtomicReferenceArray})
 
-(run! require
-      '[;;
-        [clojure.core.async :as async]
-        ;;[clojure.core.logic :as logic]
-        ;clojure.data
-        ;clojure.datafy
-        ;clojure.data.csv
-        ;clojure.data.xml
-        ;clojure.edn
-        [clojure.java.io :as io]
-        ;[clojure.pprint :as pprint]
-        clojure.string
-        clojure.set
-        ;[clojure.test :refer [deftest testing is are]]
-        ;clojure.walk
-        ;[clojure.zip :as zip]
-        ])
+(def namespaces-to-require
+  '[[clojure.core]
+    [clojure.core.async :as async]
+                                        ;[clojure.core.logic :as logic]
+                                        ;clojure.data
+                                        ;clojure.datafy
+                                        ;clojure.data.csv
+                                        ;clojure.data.xml
+                                        ;clojure.edn
+    [clojure.java.io :as io]
+                                        ;[clojure.pprint :as pprint]
+    clojure.string
+    clojure.set
+                                        ;[clojure.test :refer [deftest testing is are]]
+                                        ;clojure.walk
+                                        ;[clojure.zip :as zip]
+    ])
+
+(run! require namespaces-to-require)
 
 (defmacro template [expr]
   (letfn [(unroll [expr] (cond (seq? expr) (unroll-seq expr)
@@ -184,24 +186,57 @@
   clojure.lang.IPersistentSet    (evalme [s b] (into (empty s) (for [x s] (evalme x b)))))
 
 ;; TODO: test with interfaces instead of protocols!
-(defmacro gen-eval-node [body]
-  `(reify EvalNode
-     (evalme [_ ~'&b] ~body)))
+(defmacro gen-eval-node
+  ([m body] `(with-meta (gen-eval-node ~body) ~m))
+  ([body] `(reify EvalNode (evalme [_ ~'&b] ~body))))
 
 (declare ->eval-node)
 
 (defmulti seq->eval-node (fn [&a form] (first form)) :default ::default)
+
+;; return list of lists
+(defn- var->arglists [v]
+  (assert (var? v))
+  (when (fn? @v)
+    (seq (for [args (:arglists (meta v))]
+           (if (= '& (last (butlast args)))
+             (concat (repeatedly (- (count args) 2) gensym) '[& variadic])
+             (repeatedly (count args) gensym))))))
+
+(def clojure-core-inlined-fns
+  (template
+   (hash-map
+    ~@(mapcat seq
+              (for [ns    namespaces-to-require
+                    :let  [ns (if (vector? ns) (first ns) ns)]
+                    v     (vals (ns-publics ns))
+                    :when (not (#{#'clojure.core/aget #'clojure.core/aclone ;; suppress reflection warning
+                                  #'clojure.core/alength #'clojure.core/aset} v))
+                    :when (not (:macro (meta v)))
+                    :let [arglists (var->arglists v)]
+                    :when arglists]
+                [v (list* 'fn*
+                           (symbol (str (name (symbol v)) "-inlined"))
+                           (for [args arglists]
+                             (if (= 'variadic (last args))
+                               (list (vec args) (list 'gen-eval-node (concat ['clojure.core/apply (symbol v)]
+                                                                             (for [a (butlast (butlast args))] (list 'evalme a '&b))
+                                                                             [(list 'clojure.core/for [(last args) (last args)] (list 'evalme (last args) '&b))])))
+                               (list (vec args) (list 'gen-eval-node (list* (symbol v) (for [a args] (list 'evalme a '&b))))))))])))))
+
 (defmethod seq->eval-node ::default seq-eval-call [&a s]
   (let [[f & args] (map (partial ->eval-node &a) s)
         [a1 a2 a3 a4 a5 a6 a7] args]
     (dorun args)
-    (template
-     (case (count args)
-       ~@(for [i (range 8)]
-           [i (list 'gen-eval-node (list* '.invoke (quote ^clojure.lang.IFn (evalme f &b))
-                                           (for [j (range 1 (inc i))] (list 'evalme (symbol (str 'a j)) '&b))))])
-       ;; else
-       (gen-eval-node (apply (evalme f &b) (for [e args] (evalme e &b))))))))
+    (if-let [call-factory (clojure-core-inlined-fns (::var (meta f)))]
+      (apply call-factory args)
+      (template
+       (case (count args)
+         ~@(for [i (range 8)]
+             [i (list 'gen-eval-node (list* '.invoke (quote ^clojure.lang.IFn (evalme f &b))
+                                             (for [j (range 1 (inc i))] (list 'evalme (symbol (str 'a j)) '&b))))])
+         ;; else
+         (gen-eval-node (apply (evalme f &b) (for [e args] (evalme e &b)))))))))
 
 (defmethod seq->eval-node 'quote seq-eval-quote [&a [_ quoted]] (gen-eval-node quoted))
 
@@ -533,9 +568,10 @@
   (if (contains? &a expr)
     (gen-eval-node (get &b expr))
     (if (var? (resolve expr))
+      ;; TODO: kicsit sok a resolve!
       (if (bound? (resolve expr))
-        (let [s @(resolve expr)] (gen-eval-node s))
-        (gen-eval-node @(resolve expr))) ;; var was unbound at compile time so we need to deref in in runtime
+        (let [s @(resolve expr)] (gen-eval-node {::var (resolve expr)} s))
+        (gen-eval-node {::unbound-var (resolve expr)} @(resolve expr))) ;; var was unbound at compile time so we need to deref in in runtime
       (if-let [parent (some-> expr namespace symbol resolve)]
         (if (class? parent)
           (gen-eval-node (clojure.lang.Reflector/getStaticField ^Class parent (name expr)))
