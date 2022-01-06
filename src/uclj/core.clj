@@ -192,29 +192,40 @@
 
 (defmulti seq->eval-node (fn [&a form] (first form)) :default ::default)
 
-;; generate the following map in compile-time:
-;; - keys are vars that bind to functions with 2 arity.
-;; - values are functions that take 2 arguments as return an eval-node.
-;; it is used for inlining common function calls.
-(def clojure-core-binary-fns
+;; return list of lists
+(defn- var->arglists [v]
+  (assert (var? v))
+  (when (fn? @v)
+    (seq (for [args (:arglists (meta v))]
+           (if (= '& (last (butlast args)))
+             (concat (repeatedly (- (count args) 2) gensym) '[& variadic])
+             (repeatedly (count args) gensym))))))
+
+(def clojure-core-inlined-fns
   (template
    (hash-map
     ~@(mapcat seq
               (for [v (vals (ns-publics 'clojure.core))
-                    :when (not= #'clojure.core/aget v)
+                    :when (not (#{#'clojure.core/aget #'clojure.core/aclone ;; suppress reflection warning
+                                  #'clojure.core/alength #'clojure.core/aset} v))
                     :when (not (:macro (meta v)))
-                    :when (some (fn [a] (or (and (= 2 (count a)) (not= '& (first a)))
-                                            (some #{'&} (take 3 a))))
-                                (:arglists (meta v)))]
-                [v (list 'fn* '[a b] (list 'gen-eval-node (list (symbol v) '(evalme a &b) '(evalme b &b))))])))))
+                    :let [arglists (var->arglists v)]
+                    :when arglists]
+                [v (list* 'fn*
+                           (symbol (str (name (symbol v)) "-inlined"))
+                           (for [args arglists]
+                             (if (= 'variadic (last args))
+                               (list (vec args) (list 'gen-eval-node (concat ['clojure.core/apply (symbol v)]
+                                                                             (for [a (butlast (butlast args))] (list 'evalme a '&b))
+                                                                             [(list 'clojure.core/for [(last args) (last args)] (list 'evalme (last args) '&b))])))
+                               (list (vec args) (list 'gen-eval-node (list* (symbol v) (for [a args] (list 'evalme a '&b))))))))])))))
 
 (defmethod seq->eval-node ::default seq-eval-call [&a s]
   (let [[f & args] (map (partial ->eval-node &a) s)
         [a1 a2 a3 a4 a5 a6 a7] args]
     (dorun args)
-    (if-let [call-factory (when (= 2 (count args))
-                            (clojure-core-binary-fns (::var (meta f))))]
-      (call-factory a1 a2)
+    (if-let [call-factory (clojure-core-inlined-fns (::var (meta f)))]
+      (apply call-factory args)
       (template
        (case (count args)
          ~@(for [i (range 8)]
