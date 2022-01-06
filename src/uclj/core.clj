@@ -578,12 +578,31 @@
           (throw (ex-info (str "Cannot access symbol! " expr) {:symbol expr})))
         (throw (ex-info (str "Cannot resolve symbol! " expr) {:symbol expr}))))))
 
+(defn- self-evaluating? [expr]
+  (cond (seq? expr)     (= 'quote (first expr))
+        (map? expr)     (and (every? self-evaluating? (keys expr)) (every? self-evaluating? (vals expr)))
+        (coll? expr)    (every? self-evaluating? expr) ;; set or vec
+        ((some-fn string? number? boolean? nil? char? keyword?) expr) true
+        (instance? java.util.regex.Pattern expr) true
+        :else           false))
+
+(defn- unwrap-self-evaluating [expr]
+  (cond (seq? expr)    (second expr) ;; unquote
+        (map? expr)    (zipmap (map unwrap-self-evaluating (keys expr)) (map unwrap-self-evaluating (vals expr)))
+        (coll? expr)   (into (empty expr) (map unwrap-self-evaluating expr)) ;; set or vec
+        :else          expr))
+
 (defn ->eval-node [&a expr]
   (cond (seq? expr)  (seq->eval-node &a expr)
-        (map? expr)  (persistent! (reduce-kv (fn [a k v] (assoc! a (->eval-node &a k) (->eval-node &a v))) (transient (empty expr))  expr))
-        (coll? expr) (into (empty expr) (map (partial ->eval-node &a) expr))
+        (map? expr)  (if (self-evaluating? expr)
+                       (gen-eval-node (unwrap-self-evaluating expr))
+                       (persistent! (reduce-kv (fn [a k v] (assoc! a (->eval-node &a k) (->eval-node &a v)))
+                                               (transient (empty expr)) expr)))
+        ;; set or vector
+        (coll? expr) (if (self-evaluating? expr)
+                       (gen-eval-node (unwrap-self-evaluating expr))
+                       (into (empty expr) (map (partial ->eval-node &a) expr)))
 
-        ;; TODO: statically lookup common core symbols! check that symbol is not yet bound!!!!!
         (symbol? expr) (sym->eval-node &a expr)
         :else expr))
 
