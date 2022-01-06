@@ -12,23 +12,25 @@
    'clojure.lang.LazySeq clojure.lang.LazySeq
    'java.util.concurrent.atomic.AtomicReferenceArray java.util.concurrent.atomic.AtomicReferenceArray})
 
-(run! require
-      '[;;
-        [clojure.core.async :as async]
-        ;;[clojure.core.logic :as logic]
-        ;clojure.data
-        ;clojure.datafy
-        ;clojure.data.csv
-        ;clojure.data.xml
-        ;clojure.edn
-        [clojure.java.io :as io]
-        ;[clojure.pprint :as pprint]
-        clojure.string
-        clojure.set
-        ;[clojure.test :refer [deftest testing is are]]
-        ;clojure.walk
-        ;[clojure.zip :as zip]
-        ])
+(def namespaces-to-require
+  '[[clojure.core]
+    [clojure.core.async :as async]
+                                        ;[clojure.core.logic :as logic]
+                                        ;clojure.data
+                                        ;clojure.datafy
+                                        ;clojure.data.csv
+                                        ;clojure.data.xml
+                                        ;clojure.edn
+    [clojure.java.io :as io]
+                                        ;[clojure.pprint :as pprint]
+    clojure.string
+    clojure.set
+                                        ;[clojure.test :refer [deftest testing is are]]
+                                        ;clojure.walk
+                                        ;[clojure.zip :as zip]
+    ])
+
+(run! require namespaces-to-require)
 
 (defmacro template [expr]
   (letfn [(unroll [expr] (cond (seq? expr) (unroll-seq expr)
@@ -205,7 +207,9 @@
   (template
    (hash-map
     ~@(mapcat seq
-              (for [v (vals (ns-publics 'clojure.core))
+              (for [ns    namespaces-to-require
+                    :let  [ns (if (vector? ns) (first ns) ns)]
+                    v     (vals (ns-publics ns))
                     :when (not (#{#'clojure.core/aget #'clojure.core/aclone ;; suppress reflection warning
                                   #'clojure.core/alength #'clojure.core/aset} v))
                     :when (not (:macro (meta v)))
