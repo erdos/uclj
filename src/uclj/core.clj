@@ -431,6 +431,14 @@
                                 bindings)))
         body-node (seq->eval-node &a (list* 'do bodies))]
     (case (count bindings)
+      0
+      (gen-eval-node
+       (loop []
+         (let [last-res (evalme body-node &b)]
+           (if (instance? Recur last-res)
+             (recur)
+             last-res))))
+
       1
       (let [[[k v]] bindings]
         (gen-eval-node
