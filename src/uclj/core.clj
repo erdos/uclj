@@ -440,6 +440,18 @@
                (recur (assoc &b k (first (:bindings last-res))))
                last-res)))))
 
+      2
+      (let [[[k1 v1] [k2 v2]] bindings]
+        (gen-eval-node
+         (loop [&b (as-> &b &b
+                     (assoc &b k1 (evalme v1 &b))
+                     (assoc &b k2 (evalme v2 &b)))]
+           (let [last-res (evalme body-node &b)]
+             (if (instance? Recur last-res)
+               (let [[v1 v2] (:bindings last-res)]
+                 (recur (assoc &b k1 v1 k2 v2)))
+               last-res)))))
+
       ;; else
       (gen-eval-node
        (loop [&b (reduce (fn [&b [k v]]
