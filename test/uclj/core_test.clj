@@ -161,10 +161,16 @@
   (is (= true (evaluator '(clojure.string/blank? ""))))
   (is (= #{1 2 3} (evaluator '(clojure.set/union #{1 2} #{2 3})))))
 
-
 (deftest test-dynamic-bindings
   (testing "Bound dynamically"
-    ; (def ^:dynamic *test-dyn-1* :zero)
     (is (= false (evaluator '(binding [*print-readably* false] *print-readably*)))))
-  (testing "Marked as dynamic in def form")
-  (testing "bound-fn works"))
+  (testing "Bound dynamically to var defined here"
+    (evaluator '(def ^:dynamic *testvar*))
+    (is (= :a (evaluator '(binding [*testvar* :a] *testvar*)))))
+  (testing "Marked as dynamic in def form"
+    (evaluator '(declare ^:dynamic *testvar2*))
+    (is (= :a (evaluator '(binding [*testvar2* :a] *testvar2*)))))
+  (testing "bound-fn works"
+    (evaluator '(declare ^:dynamic *testvar3*))
+    (is (= :a (evaluator '(let [f (binding [*testvar3* :a] (bound-fn [] *testvar3*))]
+                            (f)))))))

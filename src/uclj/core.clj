@@ -254,6 +254,8 @@
                                 [nil (first def-bodies)])
         var-object ^clojure.lang.Var (intern *ns* def-name)
         value-node (->eval-node &a def-value)]
+    (when (:dynamic (meta def-name))
+      (.setDynamic var-object))
     (if (not-empty def-bodies)
       (gen-eval-node (doto var-object (.bindRoot (evalme value-node &b))))
       (gen-eval-node var-object))))
@@ -484,7 +486,7 @@
 ;; TODO: is it correct?
 (defmethod seq->eval-node 'var [&a [_ v]]
   (let [x (resolve v)] ;; TODO!
-    (assert x (str "Unable to resolve var: " (pr-str v) " in this context"))
+    (assert x (str "Unable to resolve var: " (pr-str v) " in this context in ns " *ns*))
     (gen-eval-node x)))
 
 (defmethod seq->eval-node '. [&a [_ target field & args]]
