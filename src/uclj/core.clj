@@ -590,12 +590,16 @@
 
 ;; Recursively walks macroexpanded code and adds meta information about var usage.
 ;; First arg: map from symbol to identity symbol.
+;; The metadata of response will have these keys:
+;;  ::symbol-introduced - vars in let bindings
+;;  ::symbol-used - vars that are bound from outside of current context
 (defmulti enhance-code (fn [_ e] (if (seq? e) (first e) (type e))) :default ::default)
 
 (defmethod enhance-code ::default [acc v]
   (if (seq? v)
     (let [bodies (doall (for [b v] (enhance-code acc b)))]
-      (with-meta bodies {::symbol-used (set (mapcat (comp ::symbol-used meta) bodies))}))
+      (with-meta bodies {::symbol-used (set (mapcat (comp ::symbol-used meta) bodies))
+                         ::symbol-introduced (set (mapcat (comp ::symbol-introduced meta) bodies))}))
     ;; scalar values: string, numbers, etc.
     v))
 
@@ -617,14 +621,27 @@
         bodies      (for [body bodies] (enhance-code acc body))
         symbol-used (set (remove introduced-idents
                                  (mapcat (comp ::symbol-used meta)
-                                         (concat bodies (partition 1 2 (next bindings))))))]
+                                         (concat bodies (partition 1 2 (next bindings))))))
+        symbol-introduced (into introduced-idents (mapcat (comp ::symbol-introduced meta) bodies))]
     (with-meta (list* 'let* bindings bodies)
       {::symbol-used       symbol-used
-       ::symbol-introduced introduced-idents})))
+       ::symbol-introduced symbol-introduced})))
 
-(defmethod enhance-code 'fn* [acc [_ fn-tail]]
-  ;; TODO: add acc
-  nil)
+;; acc: map of symbol->iden
+(defmethod enhance-code 'fn* [acc fn-expression]
+  (let [[fname fbodies] (parsed-fn fn-expression)
+        fbodies (for [[args & bodies] fbodies
+                      :let [new-acc (cond-> (zipmap args (repeatedly gensym))
+                                      fname (assoc fname (gensym)))
+                            acc (merge acc new-acc)
+                            bodies (for [b bodies] (enhance-code acc b))]]
+                  (with-meta (list* args bodies)
+                    {::symbol-used       (set (remove new-acc (mapcat (comp ::symbol-used meta) bodies)))
+                     ::symbol-introduced (set (keys new-acc)) ;; fname + args symbols
+                     }))]
+    (with-meta (if fname (list* 'fn* fname fbodies) (list* 'fn* fbodies))
+      ;; symbol-introduced is nil because it is a new closure!
+      {::symbol-used (set (mapcat (comp ::symbol-used meta) fbodies))})))
 
 (defmethod enhance-code 'letfn* [acc [_ bindings bodies]]
   ;; TODO: add acc
@@ -633,12 +650,14 @@
 (defmethod enhance-code clojure.lang.IPersistentVector [acc v]
   (let [elems (for [b v] (enhance-code acc b))]
     (with-meta (vec elems)
-      {::symbol-used (set (mapcat (comp ::symbol-used meta) elems))})))
+      {::symbol-used (set (mapcat (comp ::symbol-used meta) elems))
+       ::symbol-introduced (set (mapcat (comp ::symbol-introduced meta) elems))})))
 
 (defmethod enhance-code clojure.lang.IPersistentSet [acc s]
-  (let [elems (for [b v] (enhance-code acc b))]
+  (let [elems (for [b s] (enhance-code acc b))]
     (with-meta (set elems)
-      {::symbol-used (set (mapcat (comp ::symbol-used meta) elems))})))
+      {::symbol-used (set (mapcat (comp ::symbol-used meta) elems))
+       ::symbol-introduced (set (mapcat (comp ::symbol-introduced meta) elems))})))
 
 (defn expand-and-eval [expr]
   (let [expanded (macroexpand-all-code expr)
