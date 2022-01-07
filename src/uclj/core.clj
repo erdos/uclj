@@ -273,9 +273,9 @@
   ;; - hash-equiv: objects
   (let [imap (zipmap (keys imap)
                      (for [[h branch] (vals imap)]
-                       [h (->eval-node &a branch)]))
-        default-value (->eval-node &a default-value)
-        value-node    (->eval-node &a value)]
+                       [h (->eval-node &a recur-indices branch)]))
+        default-value (->eval-node &a recur-indices default-value)
+        value-node    (->eval-node &a recur-indices value)]
     (gen-eval-node
      (let [ev (evalme value-node &b)
            eh (clojure.lang.Util/hash ev)
@@ -288,9 +288,9 @@
            (evalme branch &b))
          (evalme default-value &b))))))
 
-(defmethod seq->eval-node 'do seq-eval-do [&a recur-indices [_ & bodies]]
-  (let [bodies (concat (map  (partial ->eval-node &a nil) (butlast bodies))
-                       (list (->eval-node &a recur-indices (last bodies))))
+(defmethod seq->eval-node 'do seq-eval-do [sym->iden recur-indices [_ & bodies]]
+  (let [bodies (concat (map  (partial ->eval-node sym->iden nil) (butlast bodies))
+                       (list (->eval-node sym->iden recur-indices (last bodies))))
         [b1 b2 b3 b4 b5 b6 b7 b8 b9] bodies]
     (template
      (case (count bodies)
@@ -436,6 +436,15 @@
         body-node                       (seq->eval-node iden->idx recur-indices (list* 'do bodies))
         [idx1 idx2 idx3]                recur-indices]
     (case (count bindings)
+      4 (gen-eval-node
+         (do (aset #^objects &b idx1 (evalme arg1-node &b))
+             (aset #^objects &b idx2 (evalme arg2-node &b))
+             (loop []
+               (let [result (evalme body-node &b)]
+                 (if (identical? ::recur result)
+                   (recur)
+                   result)))))
+
       2 (gen-eval-node
          (do (aset #^objects &b idx1 (evalme arg1-node &b))
              (loop []
@@ -453,7 +462,7 @@
 (defmethod seq->eval-node 'new seq-eval-new [&a recur-indices [_ class-name & args]]
   (let [clz (symbol->class class-name)
         _   (assert clz (str "Unexpected class name: " class-name))
-        [arg0 :as args] (map (partial ->eval-node &a) args)]
+        [arg0 :as args] (map (partial ->eval-node &a nil) args)]
     (case class-name
       ;; inline direct calls
       clojure.lang.LazySeq (gen-eval-node (new clojure.lang.LazySeq (evalme arg0 &b)))
@@ -485,11 +494,11 @@
 (defmethod seq->eval-node 'throw [&a _ [_ e :as form]]
   (assert (= 2 (count form)))
   (assert (or (symbol? e) (seq? e)))
-  (let [e (->eval-node &a e)]
+  (let [e (->eval-node &a nil e)]
     (gen-eval-node (throw (evalme e &b)))))
 
 (defmethod seq->eval-node 'clojure.core/eval [&a _ [_ e]]
-  (let [e (->eval-node &a e)]
+  (let [e (->eval-node &a nil e)]
     (gen-eval-node (-> e (evalme &b) (evalme nil)))))
 
 ;; TODO: is it correct?
@@ -502,7 +511,7 @@
 
   ;; TODO: how is it possible that symbol is already resolved to Class here?
   (let [[field args] (if (seq? field) [(first field) (next field)] [field args])]
-    (let [[arg1 arg2 arg3 :as args] (map (partial ->eval-node &a) args)]
+    (let [[arg1 arg2 arg3 :as args] (map (partial ->eval-node &a nil) args)]
       (if-let [target-class (cond (class? target) target
                                   (and (symbol? target) (class? (resolve target))) (resolve target))]
         ;; static invocation
@@ -513,7 +522,7 @@
           ^objects (into-array Object (for [a args] (evalme a &b)))))
 
         ;; instance invocation
-        (let [target (->eval-node &a target)]
+        (let [target (->eval-node &a nil target)]
           (case field
             nth ;; very common in let* forms
             (gen-eval-node (nth (evalme target &b) (evalme arg1 &b) (evalme arg2 &b)))
@@ -530,7 +539,7 @@
 
 (doseq [lf '[in-ns clojure.core/in-ns]]
   (defmethod seq->eval-node lf [&a _ [_ nssym]]
-    (let [sym-node (->eval-node &a nssym)]
+    (let [sym-node (->eval-node &a nil nssym)]
       (gen-eval-node
        (let [new-ns (create-ns (evalme sym-node &b))]
          ; (println :>! new-ns)
@@ -544,7 +553,7 @@
 
 (doseq [lf '[clojure.core/load-file load-file]]
   (defmethod seq->eval-node lf [&a _ [_ fname]]
-    (let [arg (->eval-node &a fname)]
+    (let [arg (->eval-node &a nil fname)]
       (gen-eval-node
        (with-open [in (new java.io.PushbackReader (io/reader (io/file (evalme arg &b))))]
          (doseq [read (repeatedly #(read {:eof ::eof} in))
@@ -553,8 +562,9 @@
 
 (defmethod seq->eval-node 'clojure.core/with-loading-context [&a _ [_ & bodies]]
   ;; needed by (ns) forms
-  (seq->eval-node &a (list* 'do bodies)))
+  (seq->eval-node &a nil (list* 'do bodies)))
 
+;; TODO!
 (defmethod seq->eval-node 'try [&a recur-indices [_ & xs]]
   (let [catch-clauses  (keep (fn [x] (when (and (seq? x) (= 'catch (first x)))
                                        [(resolve (nth x 1)) ;; type
@@ -577,7 +587,8 @@
 
 (defn sym->eval-node [iden->idx expr]
   (if-let [identity (::symbol-identity (meta expr))]
-    (let [index (int (iden->idx identity))]
+    (let [_ (println :sym->eval-node iden->idx expr identity)
+          index (int (iden->idx identity))]
       (gen-eval-node (aget #^objects &b index)))
     (if (var? (resolve expr))
       (let [^clojure.lang.Var resolved-expr (resolve expr)]
