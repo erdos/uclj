@@ -398,7 +398,7 @@
            ))))))
 
 (defmethod seq->eval-node 'let* seq-eval-let [iden->idx recur-indices [_ bindings & bodies]]
-  ; (println :seq->eval-node :let* &a (map meta bindings))
+  (println :seq->eval-node :let* iden->idx bindings (map meta bindings) (map meta bodies))
   (cond
     ;; can merge (let*) forms
     (and (= 1 (count bodies)) (seq? (first bodies)) (= 'let* (ffirst bodies)))
@@ -410,7 +410,7 @@
     (let [[[idx1 node1]
            [idx2 node2]
            [idx3 node3]] (for [[k v] (partition 2 bindings)]
-                           [(iden->idx (::symbol-identity (meta k)))
+                           [(int (iden->idx (::symbol-identity (meta k))))
                             (->eval-node iden->idx nil v)])
           body-node (seq->eval-node iden->idx recur-indices (list* 'do bodies))]
       (case (count bindings)
@@ -615,7 +615,7 @@
 ;; The metadata of response will have these keys:
 ;;  ::symbol-introduced - (identity) vars in let bindings
 ;;  ::symbol-used - (identity) vars that are bound from outside of current context
-;;  for symbols: ::symbol-identity - the (identity) symbol that can be used for evaluating
+;; For symbols: ::symbol-identity - the (identity) symbol that can be used for evaluating
 (defmulti enhance-code (fn [sym->iden e] (if (seq? e) (first e) (type e))) :default ::default)
 
 (defmethod enhance-code ::default [sym->iden v]
@@ -649,7 +649,9 @@
           symbol-used (set (remove introduced-idents
                                    (mapcat (comp ::symbol-used meta)
                                            (concat bodies (partition 1 2 (next bindings))))))
-          symbol-introduced (into introduced-idents (mapcat (comp ::symbol-introduced meta) bodies))]
+          symbol-introduced (->> introduced-idents
+                                 (into (mapcat (comp ::symbol-introduced meta) bodies))
+                                 (into (mapcat (comp ::symbol-introduced meta) bindings)))]
       (with-meta (list* form bindings bodies)
         {::symbol-used       symbol-used
          ::symbol-introduced symbol-introduced
