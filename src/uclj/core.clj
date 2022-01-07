@@ -291,9 +291,10 @@
            (evalme branch &b))
          (evalme default-value &b))))))
 
-(defmethod seq->eval-node 'do seq-eval-do [sym->iden recur-indices [_ & bodies]]
-  (let [bodies (concat (map  (partial ->eval-node sym->iden nil) (butlast bodies))
-                       (list (->eval-node sym->iden recur-indices (last bodies))))
+;; iden->idx
+(defmethod seq->eval-node 'do seq-eval-do [iden->idx recur-indices [_ & bodies]]
+  (let [bodies (concat (map (partial ->eval-node iden->idx nil) (butlast bodies))
+                       (list (->eval-node iden->idx recur-indices (last bodies))))
         [b1 b2 b3 b4 b5 b6 b7 b8 b9] bodies]
     (template
      (case (count bodies)
@@ -313,20 +314,16 @@
           (do (doseq [x butlast-body] (evalme x &b))
               (evalme last-body &b))))))))
 
+(defmethod seq->eval-node 'letfn* seq-eval-letfn [iden->idx recur-indices [_ bindings & bodies :as form]]
+  (let [idx-node-pairs (doall (for [[k f] (partition 2 bindings)]
+                                [(-> k meta ::symbol-identity iden->idx int)
+                                 (->eval-node iden->idx recur-indices f)]))
+        body-node (->eval-node iden->idx recur-indices (list* 'do bodies))]
 
-#_ ;; TODO!
-(defmethod seq->eval-node 'letfn* seq-eval-letfn [&a recur-indices [_ bindings & bodies :as form]]
-  (let [&a (into &a (for [k (take-nth 2 bindings)] [k ::letfn-binding]))
-        bindings (for [[k v] (partition 2 bindings)]
-                   [k (seq->eval-node &a v) (promise)])
-        letfn-bindings (into {} (for [[k v p] bindings]
-                                  [k (fn [& x] (apply @p x))]))
-        body-node (->eval-node &a (list* 'do bodies))]
     (gen-eval-node
-     (let [&b (merge &b letfn-bindings)]
-       (doseq [[k v p] bindings]
-         (deliver p (evalme v &b)))
-       (evalme body-node &b)))))
+     (do (doseq [[idx node] idx-node-pairs]
+           (aset #^objects &b idx (evalme node &b)))
+         (evalme body-node &b)))))
 
 (def ^:private kvs-seq (repeatedly #(vector (gensym "k") (gensym "v"))))
 
@@ -365,7 +362,8 @@
       (assert (set? symbol-used))
       (gen-eval-node
        (let [enclosed-array (object-array enclosed-count)]
-         ; (assert (array? &b) (str "No array: " (pr-str &b)))
+                                        ; (assert (array? &b) (str "No array: " (pr-str &b)))
+         ; (println :???? iden->idx symbol-used)
          (doseq [[idx sym] (map vector (range) symbol-used)
                  :let [index (int (iden->idx sym))
                        proto (aget #^objects &b index)]]
@@ -705,9 +703,27 @@
                                (into (mapcat (comp ::symbol-introduced meta) finally-bodies))
                                (cond-> (seq catches) (conj catch-identity)))})))
 
-(defmethod enhance-code 'letfn* [sym->iden [_ bindings bodies]]
-  ;; TODO: add acc
-  nil)
+(defmethod enhance-code 'letfn* [sym->iden [_ bindings & bodies]]
+  (let [sym->iden     (merge sym->iden (zipmap (take-nth 2 bindings) (repeatedly gensym)))
+        _ (println :!!! sym->iden)
+        binding-pairs (for [[var fndef] (partition 2 bindings)]
+                        [(with-meta var {::symbol-identity (sym->iden var)})
+                         (enhance-code sym->iden fndef)])
+        bodies        (for [body bodies] (enhance-code sym->iden body))
+        symbol-added  (set (map (comp ::symbol-identity meta first) binding-pairs))
+        symbol-used   (-> #{}
+                          (into (mapcat (comp ::symbol-used meta second) binding-pairs))
+                          (into (mapcat (comp ::symbol-used meta) bodies))
+                          (->> (remove symbol-added))
+                          (set))
+        symbol-introduced (-> #{}
+                              (into (mapcat (comp ::symbol-introduced meta) bodies))
+                              (into (map (comp sym->iden first) binding-pairs))
+                              (into symbol-added))]
+    (with-meta
+      (list* 'letfn* (vec (apply concat binding-pairs)) bodies)
+      {::symbol-used symbol-used
+       ::symbol-introduced symbol-introduced})))
 
 ;; set and vector: recursively run for all elements and merge meta keys
 (doseq [t [clojure.lang.IPersistentVector clojure.lang.IPersistentSet]]
