@@ -650,9 +650,9 @@
           symbol-used (set (remove introduced-idents
                                    (mapcat (comp ::symbol-used meta)
                                            (concat bodies (partition 1 2 (next bindings))))))
-          symbol-introduced (->> introduced-idents
-                                 (into (mapcat (comp ::symbol-introduced meta) bodies))
-                                 (into (mapcat (comp ::symbol-introduced meta) bindings)))]
+          symbol-introduced (-> introduced-idents
+                                (into (mapcat (comp ::symbol-introduced meta) bodies))
+                                (into (mapcat (comp ::symbol-introduced meta) bindings)))]
       (with-meta (list* form bindings bodies)
         {::symbol-used       symbol-used
          ::symbol-introduced symbol-introduced
