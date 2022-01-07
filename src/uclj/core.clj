@@ -481,9 +481,10 @@
   (let [e (->eval-node &a e)]
     (gen-eval-node (-> e (evalme &b) (evalme nil)))))
 
-(defmethod seq->eval-node 'var [&a [_ x]]
-  (let [x (resolve x)] ;; TODO!
-    (assert x (str "Unable to resolve var: " x "in this context"))
+;; TODO: is it correct?
+(defmethod seq->eval-node 'var [&a [_ v]]
+  (let [x (resolve v)] ;; TODO!
+    (assert x (str "Unable to resolve var: " (pr-str v) " in this context"))
     (gen-eval-node x)))
 
 (defmethod seq->eval-node '. [&a [_ target field & args]]
@@ -566,9 +567,10 @@
     (gen-eval-node (get &b expr))
     (if (var? (resolve expr))
       ;; TODO: kicsit sok a resolve!
-      (if (bound? (resolve expr))
-        (let [s @(resolve expr)] (gen-eval-node {::var (resolve expr)} s))
-        (gen-eval-node {::unbound-var (resolve expr)} @(resolve expr))) ;; var was unbound at compile time so we need to deref in in runtime
+      (let [^clojure.lang.Var resolved-expr (resolve expr)]
+        (if (and (bound? resolved-expr) (not (.isDynamic resolved-expr)))
+          (let [expr-val @resolved-expr] (gen-eval-node {::var resolved-expr} expr-val))
+          (gen-eval-node {::unbound-var resolved-expr} @resolved-expr))) ;; var was unbound at compile time so we need to deref in in runtime
       (if-let [parent (some-> expr namespace symbol resolve)]
         (if (class? parent)
           (gen-eval-node (clojure.lang.Reflector/getStaticField ^Class parent (name expr)))

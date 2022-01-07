@@ -160,3 +160,11 @@
 (deftest test-accessiable-namespaces
   (is (= true (evaluator '(clojure.string/blank? ""))))
   (is (= #{1 2 3} (evaluator '(clojure.set/union #{1 2} #{2 3})))))
+
+
+(deftest test-dynamic-bindings
+  (testing "Bound dynamically"
+    ; (def ^:dynamic *test-dyn-1* :zero)
+    (is (= false (evaluator '(binding [*print-readably* false] *print-readably*)))))
+  (testing "Marked as dynamic in def form")
+  (testing "bound-fn works"))
