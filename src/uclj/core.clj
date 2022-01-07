@@ -195,7 +195,7 @@
 (declare ->eval-node)
 
 ;; &a is a hash-map of identity-symbol to index in local bindings.
-(defmulti seq->eval-node (fn [&a form] (first form)) :default ::default)
+(defmulti seq->eval-node (fn [&a recur-indices form] (first form)) :default ::default)
 
 ;; return list of lists
 (defn- var->arglists [v]
@@ -227,8 +227,8 @@
                                                                              [(list 'clojure.core/for [(last args) (last args)] (list 'evalme (last args) '&b))])))
                                (list (vec args) (list 'gen-eval-node (list* (symbol v) (for [a args] (list 'evalme a '&b))))))))])))))
 
-(defmethod seq->eval-node ::default seq-eval-call [&a s]
-  (let [[f & args] (map (partial ->eval-node &a) s)
+(defmethod seq->eval-node ::default seq-eval-call [&a _ s]
+  (let [[f & args] (map (partial ->eval-node &a nil) s)
         [a1 a2 a3 a4 a5 a6 a7] args]
     (dorun args)
     (if-let [call-factory (clojure-core-inlined-fns (::var (meta f)))]
@@ -241,22 +241,22 @@
          ;; else
          (gen-eval-node (apply (evalme f &b) (for [e args] (evalme e &b)))))))))
 
-(defmethod seq->eval-node 'quote seq-eval-quote [&a [_ quoted]] (gen-eval-node quoted))
+(defmethod seq->eval-node 'quote seq-eval-quote [_ _ [_ quoted]] (gen-eval-node quoted))
 
-(defmethod seq->eval-node 'if seq-eval-if [&a [_ condition then else]]
-  (let [condition (->eval-node &a condition)
-        then      (->eval-node &a then)
-        else      (->eval-node &a else)]
+(defmethod seq->eval-node 'if seq-eval-if [&a recur-indices [_ condition then else]]
+  (let [condition (->eval-node &a recur-indices condition)
+        then      (->eval-node &a recur-indices then)
+        else      (->eval-node &a recur-indices else)]
     (if else ;; shortcut: if else branch is missing then no need to call
       (gen-eval-node (if (evalme condition &b) (evalme then &b) (evalme else &b)))
       (gen-eval-node (if (evalme condition &b) (evalme then &b))))))
 
-(defmethod seq->eval-node 'def seq-eval-def [&a [_ def-name & def-bodies]]
+(defmethod seq->eval-node 'def seq-eval-def [&a recur-indices [_ def-name & def-bodies]]
   (let [[docstring def-value] (if (= 2 (count def-bodies))
                                 def-bodies
                                 [nil (first def-bodies)])
         var-object ^clojure.lang.Var (intern *ns* def-name)
-        value-node (->eval-node &a def-value)]
+        value-node (->eval-node &a recur-indices def-value)]
     (when (:dynamic (meta def-name))
       (.setDynamic var-object))
     (if (not-empty def-bodies)
@@ -264,7 +264,7 @@
       (gen-eval-node var-object))))
 
 (defmethod seq->eval-node 'case* seq-eval-case
-  [&a [_ value shift mask default-value imap switch-type mode skip-check :as form]]
+  [&a recur-indices [_ value shift mask default-value imap switch-type mode skip-check :as form]]
   ;; (case* ~ge ~shift ~mask ~default ~imap ~switch-type :int)
   ;; switch-type: sparse vs compact
   ;; mode: ints hashes identity
@@ -288,8 +288,9 @@
            (evalme branch &b))
          (evalme default-value &b))))))
 
-(defmethod seq->eval-node 'do seq-eval-do [&a [_ & bodies]]
-  (let [bodies (map (partial ->eval-node &a) bodies)
+(defmethod seq->eval-node 'do seq-eval-do [&a recur-indices [_ & bodies]]
+  (let [bodies (concat (map  (partial ->eval-node &a nil) (butlast bodies))
+                       (list (->eval-node &a recur-indices (last bodies))))
         [b1 b2 b3 b4 b5 b6 b7 b8 b9] bodies]
     (template
      (case (count bodies)
@@ -310,7 +311,8 @@
               (evalme last-body &b))))))))
 
 
-(defmethod seq->eval-node 'letfn* seq-eval-letfn [&a [_ bindings & bodies :as form]]
+#_ ;; TODO!
+(defmethod seq->eval-node 'letfn* seq-eval-letfn [&a recur-indices [_ bindings & bodies :as form]]
   (let [&a (into &a (for [k (take-nth 2 bindings)] [k ::letfn-binding]))
         bindings (for [[k v] (partition 2 bindings)]
                    [k (seq->eval-node &a v) (promise)])
@@ -325,15 +327,7 @@
 
 (def ^:private kvs-seq (repeatedly #(vector (gensym "k") (gensym "v"))))
 
-#_
-(defn- fn-eval-node-outside
-  ([enclosed-var-1 enclosed-var-2 enclosed-var-3]
-   (gen-eval-node
-    (let [enclosed-array (object-array 3)]
-
-      ))))
-
-(defmethod seq->eval-node 'fn* seq-eval-fn [&a form]
+(defmethod seq->eval-node 'fn* seq-eval-fn [&a recur-indices form]
   ; (println :!!! (meta form))
   (assert (meta form))
     (let [[fname & bodies]      (parsed-fn form)
@@ -345,43 +339,44 @@
         rest-node             (when rest-def
                                 (->eval-node (into &a (for [k (cons rest-def-last-arg rest-def-butlast-args)]
                                                         [k ::fn-arg-binding]))
+                                             recur-indices
                                              (list* 'do rest-def-bodies)))
         bodies (remove #{rest-def} bodies)
         arity->args      (reduce (fn [m [args]] (assoc m (count args) args))
                                  {} bodies)
         arity->body-node  (into (if rest-def-bodies
                                   ;; TODO!
-                                  {:variadic (->eval-node &a (list* 'do rest-def-bodies))}
+                                  {:variadic (->eval-node &a recur-indices (list* 'do rest-def-bodies))}
                                   {})
                                 (for [[args & bodies :as def] bodies
                                       :let [&a (zipmap (concat (::symbol-used (meta def))
                                                                (::symbol-introduced (meta def)))
                                                        (range))
-                                            _ (println :><>< &a)
-                                            ;; TODO: fn name is not there likely.
-                                            &a (assoc &a ::recur-indices (mapv &a (::symbol-loop (meta def))))]]
-                                  [(count args) (->eval-node &a (list* 'do bodies))]))
+                                            recur-indices (mapv &a (::symbol-loop (meta def)))]]
+                                  [(count args) (->eval-node &a recur-indices (list* 'do bodies))]))
         arity->def (reduce (fn [m [args & bodies :as def]]
                              (assoc m (count args) def)) {} bodies)]
     (let [symbol-used    (::symbol-used (meta form))
           enclosed-count (count symbol-used)
           symbol->idx    {}
-          [body0 body1 body2] (map arity->body-node (range))]
+          [body0 body1 body2] (map arity->body-node (range))
+          [body0-symbols body1-symbols body2-symbols] (map (comp ::symbol-introduced meta arity->def) (range))]
       (assert (set? symbol-used))
+      ; (println :HELLO body0-symbols body1-symbols)
       (gen-eval-node
        (let [enclosed-array (object-array enclosed-count)]
          (doseq [[idx sym] (map vector (range) symbol-used)]
            (aset enclosed-array idx (aget #^objects &b (symbol->idx sym))))
          (fn
            ([]
-            (let [invocation-array enclosed-array]
+            (let [invocation-array (java.util.Arrays/copyOf enclosed-array (+ (count body0-symbols) enclosed-count))]
               (loop []
                 (let [result (evalme body0 invocation-array)]
                   (if (identical? ::recur result)
                     (recur)
                     result)))))
            ([x]
-            (let [invocation-array (java.util.Arrays/copyOf enclosed-array (+ 1 enclosed-count))]
+            (let [invocation-array (java.util.Arrays/copyOf enclosed-array (+ (count body1-symbols) enclosed-count))]
               ;; also: fill f with arguments
               (aset invocation-array (+ 0 enclosed-count) x)
               (loop []
@@ -390,7 +385,7 @@
                     (recur)
                     result)))))
            ([x y]
-            (let [invocation-array (java.util.Arrays/copyOf enclosed-array (+ 2 enclosed-count))]
+            (let [invocation-array (java.util.Arrays/copyOf enclosed-array (+ (count body2-symbols) enclosed-count))]
               ;; also: fill f with arguments
               (aset invocation-array (+ 0 enclosed-count) x)
               (aset invocation-array (+ 1 enclosed-count) y)
@@ -402,56 +397,44 @@
            ;; TODO: generate for all arities
            ))))))
 
-(def ks+bs (for [i (range 16)] [(symbol (str 'k (inc i))) (symbol (str 'b (inc i)))]))
-
-(defmethod seq->eval-node 'let* seq-eval-let [&a [_ bindings & bodies]]
+(defmethod seq->eval-node 'let* seq-eval-let [iden->idx recur-indices [_ bindings & bodies]]
+  ; (println :seq->eval-node :let* &a (map meta bindings))
   (cond
     ;; can merge (let*) forms
     (and (= 1 (count bodies)) (seq? (first bodies)) (= 'let* (ffirst bodies)))
-    (recur &a (list* 'let*
-                      (into bindings (second (first bodies)))
-                      (nnext (first bodies))))
+    (recur iden->idx recur-indices (list* 'let*
+                                           (into bindings (second (first bodies)))
+                                           (nnext (first bodies))))
 
     :else
-    (let [[&a let-pairs]
-          (loop [&a &a
-                 let-pairs []
-                 [k v & bindings] bindings]
-            (cond (nil? k) [&a let-pairs]
-                  :else    (recur (assoc &a k ::let-binding)
-                                  (conj let-pairs [k (->eval-node &a v)])
-                                  bindings)))
-          body-node (seq->eval-node &a (list* 'do bodies))]
-      (template
-       (let [~(vec ks+bs) (doall let-pairs)]
-         (case (count bindings)
-           0 body-node
-           ;; unroll for common arities!
-           ~@(mapcat seq (for [i (range 1 (inc (count ks+bs)))]
-                           [(* 2 i)
-                            `(gen-eval-node
-                              (let [~@(interleave
-                                       (repeat '&b)
-                                       (for [[k b] (take i ks+bs)]
-                                         (list 'assoc '&b k (list 'evalme b '&b))))]
-                                (evalme ~'body-node ~'&b)))]))
-           (gen-eval-node
-            (evalme body-node (reduce (fn [m [k v]]
-                                        (if (= k '_)
-                                          (do (evalme v m) m)
-                                          (assoc m k (evalme v m))))
-                                      &b let-pairs)))))))))
+    (let [[[idx1 node1]
+           [idx2 node2]
+           [idx3 node3]] (for [[k v] (partition 2 bindings)]
+                           [(iden->idx (::symbol-identity (meta k)))
+                            (->eval-node iden->idx nil v)])
+          body-node (seq->eval-node iden->idx recur-indices (list* 'do bodies))]
+      (case (count bindings)
+        0 body-node
 
-(defmethod seq->eval-node 'loop* seq-eval-loop [&a [_ bindings & bodies :as def]]
+        2 (gen-eval-node
+           (do (aset #^objects &b idx1 (evalme node1 &b))
+               (evalme body-node &b)))
+        4 (gen-eval-node
+           (do (aset #^objects &b idx1 (evalme node1 &b))
+               (aset #^objects &b idx2 (evalme node2 &b))
+               (evalme body-node &b)))
+        6 (gen-eval-node
+           (do (aset #^objects &b idx1 (evalme node1 &b))
+               (aset #^objects &b idx2 (evalme node2 &b))
+               (aset #^objects &b idx3 (evalme node3 &b))
+               (evalme body-node &b)))))))
+
+(defmethod seq->eval-node 'loop* seq-eval-loop [iden->idx _ [_ bindings & bodies :as def]]
   (assert (even? (count bindings)))
-  #_(println :!!! (::symbol-loop (meta def)) &a)
-  (let [[arg1-node arg2-node arg3-node] (for [[k v] (partition 2 bindings)] (->eval-node &a v))
-        recur-indices                   (mapv &a (::symbol-loop (meta def)))
-        [idx1 idx2 idx3]                recur-indices                 ;; TODO
-        &a                              (assoc &a ::recur-indices recur-indices)
-        _ '                              (assert (every? integer? &a)
-                                                (str "Not all int " (pr-str &a)))
-        body-node                       (seq->eval-node &a (list* 'do bodies))]
+  (let [[arg1-node arg2-node arg3-node] (for [[k v] (partition 2 bindings)] (->eval-node iden->idx nil v))
+        recur-indices                   (mapv iden->idx (::symbol-loop (meta def)))
+        body-node                       (seq->eval-node iden->idx recur-indices (list* 'do bodies))
+        [idx1 idx2 idx3]                recur-indices]
     (case (count bindings)
       2 (gen-eval-node
          (do (aset #^objects &b idx1 (evalme arg1-node &b))
@@ -467,7 +450,7 @@
                    (recur)
                    result))))))))
 
-(defmethod seq->eval-node 'new seq-eval-new [&a [_ class-name & args]]
+(defmethod seq->eval-node 'new seq-eval-new [&a recur-indices [_ class-name & args]]
   (let [clz (symbol->class class-name)
         _   (assert clz (str "Unexpected class name: " class-name))
         [arg0 :as args] (map (partial ->eval-node &a) args)]
@@ -480,12 +463,12 @@
        (let [args (for [a args] (evalme a &b))]
          (clojure.lang.Reflector/invokeConstructor clz (into-array Object args)))))))
 
-(defmethod seq->eval-node 'recur seq-eval-recur [iden->idx [_ & values]]
-  (assert (::recur-indices iden->idx)) ;; must be tail pos!
-  (assert (= (count (::recur-indices iden->idx)) (count values)))
-  (let [nodes (map (partial ->eval-node iden->idx) values)
+(defmethod seq->eval-node 'recur seq-eval-recur [iden->idx recur-indices [_ & values]]
+  (assert recur-indices "Recur is not in tail position!")
+  (assert (= (count recur-indices) (count values)) "Recur argument count mismatch!")
+  (let [nodes (map (partial ->eval-node iden->idx nil) values)
         [n1 n2 n3 n4] nodes
-        [i1 i2 i3 i4] (::recur-indices iden->idx)] ;; TODO!!
+        [i1 i2 i3 i4] recur-indices] ;; TODO!!
     (case (count nodes)
       0 (gen-eval-node (let [] ::recur))
       1 (gen-eval-node (let [v1 (evalme n1 &b)]
@@ -499,23 +482,23 @@
     ;; TODO: more arities with template!
     ))
 
-(defmethod seq->eval-node 'throw [&a [_ e :as form]]
+(defmethod seq->eval-node 'throw [&a _ [_ e :as form]]
   (assert (= 2 (count form)))
   (assert (or (symbol? e) (seq? e)))
   (let [e (->eval-node &a e)]
     (gen-eval-node (throw (evalme e &b)))))
 
-(defmethod seq->eval-node 'clojure.core/eval [&a [_ e]]
+(defmethod seq->eval-node 'clojure.core/eval [&a _ [_ e]]
   (let [e (->eval-node &a e)]
     (gen-eval-node (-> e (evalme &b) (evalme nil)))))
 
 ;; TODO: is it correct?
-(defmethod seq->eval-node 'var [&a [_ v]]
+(defmethod seq->eval-node 'var [&a _ [_ v]]
   (let [x (resolve v)] ;; TODO!
     (assert x (str "Unable to resolve var: " (pr-str v) " in this context in ns " *ns*))
     (gen-eval-node x)))
 
-(defmethod seq->eval-node '. [&a [_ target field & args]]
+(defmethod seq->eval-node '. [&a _ [_ target field & args]]
 
   ;; TODO: how is it possible that symbol is already resolved to Class here?
   (let [[field args] (if (seq? field) [(first field) (next field)] [field args])]
@@ -546,7 +529,7 @@
 (declare expand-and-eval)
 
 (doseq [lf '[in-ns clojure.core/in-ns]]
-  (defmethod seq->eval-node lf [&a [_ nssym]]
+  (defmethod seq->eval-node lf [&a _ [_ nssym]]
     (let [sym-node (->eval-node &a nssym)]
       (gen-eval-node
        (let [new-ns (create-ns (evalme sym-node &b))]
@@ -560,7 +543,7 @@
              (.doReset (var *ns*) new-ns))))))))
 
 (doseq [lf '[clojure.core/load-file load-file]]
-  (defmethod seq->eval-node lf [&a [_ fname]]
+  (defmethod seq->eval-node lf [&a _ [_ fname]]
     (let [arg (->eval-node &a fname)]
       (gen-eval-node
        (with-open [in (new java.io.PushbackReader (io/reader (io/file (evalme arg &b))))]
@@ -568,20 +551,22 @@
                  :while (not= ::eof read)]
            (expand-and-eval read)))))))
 
-(defmethod seq->eval-node 'clojure.core/with-loading-context [&a [_ & bodies]]
+(defmethod seq->eval-node 'clojure.core/with-loading-context [&a _ [_ & bodies]]
   ;; needed by (ns) forms
   (seq->eval-node &a (list* 'do bodies)))
 
-(defmethod seq->eval-node 'try [&a [_ & xs]]
+(defmethod seq->eval-node 'try [&a recur-indices [_ & xs]]
   (let [catch-clauses  (keep (fn [x] (when (and (seq? x) (= 'catch (first x)))
                                        [(resolve (nth x 1)) ;; type
                                         (nth x 2) ;; variable
-                                        (->eval-node (assoc &a (nth x 2) ::catch-var-binding) (list* 'do (nthrest x 2)))]))
+                                        (->eval-node (assoc &a (nth x 2) ::catch-var-binding)
+                                                     recur-indices
+                                                     (list* 'do (nthrest x 2)))]))
                              xs)
         bodies         (remove (fn [x] (and (seq? x) ('#{finally catch} (first x)))) xs)
-        body-node (seq->eval-node &a (list* 'do bodies))
+        body-node (seq->eval-node &a recur-indices (list* 'do bodies))
         finally-node (some (fn [x] (when (and (seq? x) (= 'finally (first x)))
-                                     (->eval-node &a (list* 'do (next x))))) xs)]
+                                     (->eval-node &a nil (list* 'do (next x))))) xs)]
     (gen-eval-node
      (try (evalme body-node &b)
           (catch Throwable t
@@ -605,14 +590,13 @@
           (throw (ex-info (str "Cannot access symbol! " expr) {:symbol expr})))
         (throw (ex-info (str "Cannot resolve symbol! " expr) {:symbol expr}))))))
 
-(defn ->eval-node [&a expr]
-  (let [&a (dissoc &a ::recur-indices)]
-    (assert (every? symbol? (keys &a)) (str "Not all sym: " (pr-str &a)))
-    (assert (every? integer? (vals &a)) (str "Not all int: " (pr-str &a))))
-  (cond (seq? expr)  (seq->eval-node &a expr)
-        (map? expr)  (persistent! (reduce-kv (fn [a k v] (assoc! a (->eval-node &a k) (->eval-node &a v))) (transient (empty expr))  expr))
-        (coll? expr) (into (empty expr) (map (partial ->eval-node &a) expr))
-        (symbol? expr) (sym->eval-node &a expr)
+(defn ->eval-node [sym->iden recur-indices expr]
+  (when recur-indices
+    (every? integer? recur-indices))
+  (cond (seq? expr)  (seq->eval-node sym->iden recur-indices expr)
+        (map? expr)  (persistent! (reduce-kv (fn [a k v] (assoc! a (->eval-node sym->iden nil k) (->eval-node sym->iden nil v))) (transient (empty expr))  expr))
+        (coll? expr) (into (empty expr) (map (partial ->eval-node sym->iden nil) expr))
+        (symbol? expr) (sym->eval-node sym->iden expr)
         :else expr))
 
 ;; Recursively walks macroexpanded code and adds meta information about var usage.
@@ -645,7 +629,9 @@
                     (let [key-iden (gensym)]
                       [(assoc sym->iden k key-iden)
                        (conj introduced-idents key-iden)
-                       (conj mapped-bindings k (enhance-code sym->iden v))]))
+                       (conj mapped-bindings
+                             (with-meta k {::symbol-identity key-iden})
+                             (enhance-code sym->iden v))]))
                   [sym->iden #{} []]
                   (partition 2 bindings))
           bodies      (for [body bodies] (enhance-code sym->iden body))
@@ -658,16 +644,15 @@
          ::symbol-introduced symbol-introduced
          ::symbol-loop       (when (= form 'loop*) introduced-idents)}))))
 
-;; acc: map of symbol->iden
 (defmethod enhance-code 'fn* [sym->iden fn-expression]
-  (println :enhnancing-fn-expr sym->iden fn-expression (meta fn-expression))
   (let [[fname & fbodies] (parsed-fn fn-expression)
         fbodies (for [[args & bodies] fbodies
-                      :let [new-acc (cond-> (zipmap (remove #{'&} args) (repeatedly gensym))
-                                      fname (assoc fname (gensym)))
+                      :let [new-acc   (cond-> (zipmap (remove #{'&} args) (repeatedly gensym))
+                                        fname (assoc fname (gensym)))
                             new-acc-1 (zipmap (vals new-acc) (keys new-acc))
                             sym->iden (merge sym->iden new-acc)
-                            bodies (for [b bodies] (enhance-code sym->iden b))]]
+                            bodies    (for [body bodies] (enhance-code sym->iden body))
+                            args      (mapv (fn [s] (with-meta s {::symbol-identity (new-acc s)})) args)]]
                   (with-meta (list* args bodies)
                     {::symbol-used       (set (remove new-acc-1 (mapcat (comp ::symbol-used meta) bodies)))
                      ::symbol-introduced (into (set (keys new-acc-1))
@@ -694,7 +679,7 @@
   (let [expr     `((fn* [] ~expr))
         expanded (macroexpand-all-code expr)
         enhanced (enhance-code {} expanded)
-        node     (->eval-node {} enhanced)]
+        node     (->eval-node {} nil enhanced)]
     (evalme node basic-bindings)))
 
 (def evaluator expand-and-eval)
