@@ -362,8 +362,6 @@
       (assert (set? symbol-used))
       (gen-eval-node
        (let [enclosed-array (object-array enclosed-count)]
-                                        ; (assert (array? &b) (str "No array: " (pr-str &b)))
-         ; (println :???? iden->idx symbol-used)
          (doseq [[idx sym] (map vector (range) symbol-used)
                  :let [index (int (iden->idx sym))
                        proto (aget #^objects &b index)]]
@@ -432,6 +430,8 @@
 
 (defmethod seq->eval-node 'loop* seq-eval-loop [iden->idx _ [_ bindings & bodies :as def]]
   (assert (even? (count bindings)))
+  (assert (vector? (::symbol-loop (meta def))))
+  (assert (every? symbol? (::symbol-loop (meta def))))
   (let [[arg1-node arg2-node arg3-node] (for [[k v] (partition 2 bindings)] (->eval-node iden->idx nil v))
         recur-indices                   (mapv iden->idx (::symbol-loop (meta def)))
         body-node                       (seq->eval-node iden->idx recur-indices (list* 'do bodies))
@@ -654,7 +654,7 @@
       (with-meta (list* form bindings bodies)
         {::symbol-used       symbol-used
          ::symbol-introduced symbol-introduced
-         ::symbol-loop       (when (= form 'loop*) introduced-idents)}))))
+         ::symbol-loop       (when (= form 'loop*) (mapv sym->iden (take-nth 2 bindings)))}))))
 
 (defmethod enhance-code 'fn* [sym->iden fn-expression]
   (let [[fname & fbodies] (parsed-fn fn-expression)
@@ -670,7 +670,8 @@
                      ::symbol-introduced (into (set (keys new-acc-1))
                                                ;; TODO: also add fn name when needed!!!
                                                (mapcat (comp ::symbol-introduced meta) bodies))
-                     ::symbol-loop       (set (keys new-acc-1))}))]
+                     ::symbol-loop (mapv new-acc args)
+                     #_(set (keys new-acc-1))}))]
     (with-meta (if fname (list* 'fn* fname fbodies) (list* 'fn* fbodies))
       ;; symbol-introduced is nil because it is a new closure!
       {::symbol-used (set (mapcat (comp ::symbol-used meta) fbodies))})))
@@ -705,7 +706,6 @@
 
 (defmethod enhance-code 'letfn* [sym->iden [_ bindings & bodies]]
   (let [sym->iden     (merge sym->iden (zipmap (take-nth 2 bindings) (repeatedly gensym)))
-        _ (println :!!! sym->iden)
         binding-pairs (for [[var fndef] (partition 2 bindings)]
                         [(with-meta var {::symbol-identity (sym->iden var)})
                          (enhance-code sym->iden fndef)])
