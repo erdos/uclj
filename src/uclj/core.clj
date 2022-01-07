@@ -330,17 +330,17 @@
 
 (def ^:private kvs-seq (repeatedly #(vector (gensym "k") (gensym "v"))))
 
-(defmethod seq->eval-node 'fn* seq-eval-fn [&a recur-indices form]
+(defmethod seq->eval-node 'fn* seq-eval-fn [iden->idx recur-indices form]
   (assert (meta form))
   (let [[fname & bodies]      (parsed-fn form)
-        &a                    (if fname (assoc &a fname ::fn-name-binding) &a)
+        iden->idx             (if fname (assoc iden->idx fname ::fn-name-binding) iden->idx)
         rest-def              (first (filter (fn [[args]] (some #{'&} args)) bodies))
         rest-def-butlast-args (drop-last 2 (first rest-def))
         rest-def-last-arg     (last (first rest-def))
         rest-def-bodies       (next rest-def)
         rest-node             (when rest-def
-                                (->eval-node (into &a (for [k (cons rest-def-last-arg rest-def-butlast-args)]
-                                                        [k ::fn-arg-binding]))
+                                (->eval-node (into iden->idx (for [k (cons rest-def-last-arg rest-def-butlast-args)]
+                                                               [k ::fn-arg-binding]))
                                              recur-indices
                                              (list* 'do rest-def-bodies)))
         bodies (remove #{rest-def} bodies)
@@ -348,28 +348,28 @@
                                  {} bodies)
         arity->body-node  (into (if rest-def-bodies
                                   ;; TODO!
-                                  {:variadic (->eval-node &a recur-indices (list* 'do rest-def-bodies))}
+                                  {:variadic (->eval-node iden->idx recur-indices (list* 'do rest-def-bodies))}
                                   {})
                                 (for [[args & bodies :as def] bodies
-                                      :let [&a (zipmap (concat (::symbol-used (meta def))
-                                                               (::symbol-introduced (meta def)))
-                                                       (range))
-                                            recur-indices (mapv &a (::symbol-loop (meta def)))]]
-                                  [(count args) (->eval-node &a recur-indices (list* 'do bodies))]))
+                                      :let [iden->idx (zipmap (concat (::symbol-used (meta def))
+                                                                      (::symbol-introduced (meta def)))
+                                                              (range))
+                                            recur-indices (mapv iden->idx (::symbol-loop (meta def)))]]
+                                  [(count args) (->eval-node iden->idx recur-indices (list* 'do bodies))]))
         arity->def (reduce (fn [m [args & bodies :as def]]
                              (assoc m (count args) def)) {} bodies)]
     (let [symbol-used    (::symbol-used (meta form))
           enclosed-count (count symbol-used)
-          symbol->idx    {}
           [body0 body1 body2] (map arity->body-node (range))
           [body0-symbols body1-symbols body2-symbols] (map (comp ::symbol-introduced meta arity->def) (range))]
       (assert (set? symbol-used))
-      ; (println :HELLO body0-symbols body1-symbols)
       (gen-eval-node
        (let [enclosed-array (object-array enclosed-count)]
          ; (assert (array? &b) (str "No array: " (pr-str &b)))
-         (doseq [[idx sym] (map vector (range) symbol-used)]
-           (aset enclosed-array idx (aget #^objects &b (symbol->idx sym))))
+         (doseq [[idx sym] (map vector (range) symbol-used)
+                 :let [index (int (iden->idx sym))
+                       proto (aget #^objects &b index)]]
+           (aset enclosed-array idx proto))
          (fn
            ([]
             (let [invocation-array (java.util.Arrays/copyOf enclosed-array (+ (count body0-symbols) enclosed-count))]
