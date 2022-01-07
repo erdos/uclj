@@ -588,8 +588,61 @@
         (symbol? expr) (sym->eval-node &a expr)
         :else expr))
 
+;; Recursively walks macroexpanded code and adds meta information about var usage.
+;; First arg: map from symbol to identity symbol.
+(defmulti enhance-code (fn [_ e] (if (seq? e) (first e) (type e))) :default ::default)
+
+(defmethod enhance-code ::default [acc v]
+  (if (seq? v)
+    (let [bodies (doall (for [b v] (enhance-code acc b)))]
+      (with-meta bodies {::symbol-used (set (mapcat (comp ::symbol-used meta) bodies))}))
+    ;; scalar values: string, numbers, etc.
+    v))
+
+(defmethod enhance-code clojure.lang.Symbol [acc s]
+  (if-let [iden (get acc s)]
+    (with-meta s {::symbol-identity iden, ::symbol-used #{iden}})
+    s))
+
+;; these add new bindings!!!!
+(defmethod enhance-code 'let* [acc [_ bindings & bodies]]
+  (let [[acc introduced-idents bindings]
+        (reduce (fn [[acc introduced-idents mapped-bindings] [k v]]
+                  (let [key-iden (gensym)]
+                    [(assoc acc k key-iden)
+                     (conj introduced-idents key-iden)
+                     (conj mapped-bindings k (enhance-code acc v))]))
+                [acc #{} []]
+                (partition 2 bindings))
+        bodies      (for [body bodies] (enhance-code acc body))
+        symbol-used (set (remove introduced-idents
+                                 (mapcat (comp ::symbol-used meta)
+                                         (concat bodies (partition 1 2 (next bindings))))))]
+    (with-meta (list* 'let* bindings bodies)
+      {::symbol-used       symbol-used
+       ::symbol-introduced introduced-idents})))
+
+(defmethod enhance-code 'fn* [acc [_ fn-tail]]
+  ;; TODO: add acc
+  nil)
+
+(defmethod enhance-code 'letfn* [acc [_ bindings bodies]]
+  ;; TODO: add acc
+  nil)
+
+(defmethod enhance-code clojure.lang.IPersistentVector [acc v]
+  (let [elems (for [b v] (enhance-code acc b))]
+    (with-meta (vec elems)
+      {::symbol-used (set (mapcat (comp ::symbol-used meta) elems))})))
+
+(defmethod enhance-code clojure.lang.IPersistentSet [acc s]
+  (let [elems (for [b v] (enhance-code acc b))]
+    (with-meta (set elems)
+      {::symbol-used (set (mapcat (comp ::symbol-used meta) elems))})))
+
 (defn expand-and-eval [expr]
   (let [expanded (macroexpand-all-code expr)
+        enhanced (enhance-code expr)
         node     (->eval-node {} expanded)]
     (evalme node basic-bindings)))
 
