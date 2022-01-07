@@ -32,6 +32,8 @@
 
 (run! require namespaces-to-require)
 
+(defn- array? [x] (.isArray (class x)))
+
 (defmacro template [expr]
   (letfn [(unroll [expr] (cond (seq? expr) (unroll-seq expr)
                                (vector? expr) [(vec (mapcat unroll expr))]
@@ -192,6 +194,7 @@
 
 (declare ->eval-node)
 
+;; &a is a hash-map of identity-symbol to index in local bindings.
 (defmulti seq->eval-node (fn [&a form] (first form)) :default ::default)
 
 ;; return list of lists
@@ -322,16 +325,27 @@
 
 (def ^:private kvs-seq (repeatedly #(vector (gensym "k") (gensym "v"))))
 
+#_
+(defn- fn-eval-node-outside
+  ([enclosed-var-1 enclosed-var-2 enclosed-var-3]
+   (gen-eval-node
+    (let [enclosed-array (object-array 3)]
+
+      ))))
+
 (defmethod seq->eval-node 'fn* seq-eval-fn [&a form]
+  (println :!!! (meta form))
+  (assert (meta form))
   (let [[fname & bodies]      (parsed-fn form)
         &a                    (if fname (assoc &a fname ::fn-name-binding) &a)
         rest-def              (first (filter (fn [[args]] (some #{'&} args)) bodies))
         rest-def-butlast-args (drop-last 2 (first rest-def))
         rest-def-last-arg     (last (first rest-def))
         rest-def-bodies       (next rest-def)
-        rest-node             (->eval-node (into &a (for [k (cons rest-def-last-arg rest-def-butlast-args)]
-                                                      [k ::fn-arg-binding]))
-                                           (list* 'do rest-def-bodies))
+        rest-node             (when rest-def
+                                (->eval-node (into &a (for [k (cons rest-def-last-arg rest-def-butlast-args)]
+                                                        [k ::fn-arg-binding]))
+                                             (list* 'do rest-def-bodies)))
         bodies (remove #{rest-def} bodies)
         arity->args      (reduce (fn [m [args]] (assoc m (count args) args))
                                  {} bodies)
@@ -339,50 +353,35 @@
                                   {:variadic (->eval-node &a (list* 'do rest-def-bodies))}
                                   {})
                                 (for [[args & bodies :as def] bodies
-                                      :let [&a (into &a (for [k args] [k ::fn-arg-binding]))]]
-                                  [(count args) (->eval-node &a (list* 'do bodies))]))
+                                      :let [&a (zipmap (concat (::symbol-used (meta def)) (::symbol-introduced (meta def)))
+                                                       (range))
+                                            #_(into &a (for [k args] [k ::fn-arg-binding]))]]
+                                  (do (println :!! &a (meta def) (meta form) (map meta form) form)
+                                      [(count args) (->eval-node &a (list* 'do bodies))])))
         arity->def (reduce (fn [m [args & bodies :as def]]
                              (assoc m (count args) def)) {} bodies)]
-    (template
-     (cond
-       ~@(mapcat seq
-                 (for [i (range 0 21)
-                       :let [fname (symbol (str 'fnarity i))
-                             many-vars (map first (take i kvs-seq))
-                             many-keys (map second (take i kvs-seq))]]
-                   [`(and (not ~'rest-def) (= 1 (count ~'bodies)) (~'arity->args ~i))
-                    `(let [[~@many-vars] (~'arity->args ~i)
-                           body#   (~'arity->body-node ~i)]
-                       (gen-eval-node
-                        (fn ~fname [~@many-keys]
-                          (let [~'&b (if ~'fname (assoc ~'&b ~'fname ~(symbol (str 'fnarity i))) ~'&b)
-                                ~'&b ~(if (zero? i)
-                                        '&b
-                                          (list* 'assoc '&b (interleave many-vars many-keys)))
-                                call-result# (evalme body# ~'&b)]
-                            (if (instance? Recur call-result#)
-                              (let [[~@many-vars] (:bindings call-result#)]
-                                (recur ~@many-vars))
-                              call-result#)))))]))
-
-       :else
-       (gen-eval-node
-        (fn f [& call-args]
-          (let [&b (if fname (assoc &b fname f) &b)
-                call-result
-                (let [c (count call-args)] ;; TODO: can it be infinite?
-                  (if-let [[args] (arity->def c)]
-                    (let [&b (into &b (map vector args call-args))]
-                      (evalme (arity->body-node c) &b))
-                    (if rest-def ;; not node, that can be null also
-                      (-> &b
-                          (into (zipmap rest-def-butlast-args call-args))
-                          (assoc rest-def-last-arg (drop (count rest-def-butlast-args) call-args))
-                          (->> (evalme rest-def)))
-                      (assert false "Called with unexpected arity!"))))]
-            (if (instance? Recur call-result)
-              (recur (:bindings call-result))
-              call-result))))))))
+    (let [symbol-used    (::symbol-used (meta form))
+          enclosed-count (count symbol-used)
+          symbol->idx    {}]
+      (assert (set? symbol-used))
+      (gen-eval-node
+       (let [enclosed-array (object-array enclosed-count)]
+         (doseq [[idx sym] (map vector (range) symbol-used)]
+           (aset enclosed-array idx (aget &b (symbol->idx sym))))
+         (fn
+           ([]
+            (let [invocation-array enclosed-array]
+              (evalme (arity->body-node 0) invocation-array)))
+           ([x]
+            (let [invocation-array (java.util.Arrays/copyOf enclosed-array (+ 1 enclosed-count))]
+              ;; also: fill f with arguments
+              (aset invocation-array (+ 0 enclosed-count) x)
+              (evalme (arity->body-node 1) invocation-array)))
+           #_([x y]
+            (let [invocation-array (java.util.Arrays/copyOf enclosed-array (+ 2 enclosed-count))]
+              (aset invocation-array (+ 0 enclosed-count) x)
+              (aset invocation-array (+ 1 enclosed-count) y)
+              (evalme (arity->body-node 2) invocation-array)))))))))
 
 (def ks+bs (for [i (range 16)] [(symbol (str 'k (inc i))) (symbol (str 'b (inc i)))]))
 
@@ -564,9 +563,10 @@
               (throw t)))
           (finally (evalme finally-node &b))))))
 
-(defn sym->eval-node [&a expr]
-  (if (contains? &a expr)
-    (gen-eval-node (get &b expr))
+(defn sym->eval-node [iden->idx expr]
+  (if-let [identity (::symbol-identity (meta expr))]
+    (let [index (int (iden->idx identity))]
+      (gen-eval-node (aget &b index)))
     (if (var? (resolve expr))
       ;; TODO: kicsit sok a resolve!
       (let [^clojure.lang.Var resolved-expr (resolve expr)]
@@ -576,10 +576,12 @@
       (if-let [parent (some-> expr namespace symbol resolve)]
         (if (class? parent)
           (gen-eval-node (clojure.lang.Reflector/getStaticField ^Class parent (name expr)))
-          (throw (ex-info (str "Cannot access symbol! " expr) {:symbol expr})))
-        (throw (ex-info (str "Cannot resolve symbol! " expr) {:symbol expr}))))))
+          (throw (ex-info (str "Cannot access symbol! " expr (meta expr)) {:symbol expr})))
+        (throw (ex-info (str "Cannot resolve symbol! " expr (meta expr)) {:symbol expr}))))))
 
 (defn ->eval-node [&a expr]
+  (assert (every? symbol? (keys &a)) (str "Not all sym: " (pr-str &a)))
+  (assert (every? integer? (vals &a)) (str "Not all int: " (pr-str &a)))
   (cond (seq? expr)  (seq->eval-node &a expr)
         (map? expr)  (persistent! (reduce-kv (fn [a k v] (assoc! a (->eval-node &a k) (->eval-node &a v))) (transient (empty expr))  expr))
         (coll? expr) (into (empty expr) (map (partial ->eval-node &a) expr))
@@ -594,32 +596,33 @@
 ;;  ::symbol-introduced - (identity) vars in let bindings
 ;;  ::symbol-used - (identity) vars that are bound from outside of current context
 ;;  for symbols: ::symbol-identity - the (identity) symbol that can be used for evaluating
-(defmulti enhance-code (fn [_ e] (if (seq? e) (first e) (type e))) :default ::default)
+(defmulti enhance-code (fn [sym->iden e] (if (seq? e) (first e) (type e))) :default ::default)
 
-(defmethod enhance-code ::default [acc v]
+(defmethod enhance-code ::default [sym->iden v]
   (if (seq? v)
-    (let [bodies (doall (for [b v] (enhance-code acc b)))]
+    (let [bodies (doall (for [b v] (enhance-code sym->iden b)))]
       (with-meta bodies {::symbol-used (set (mapcat (comp ::symbol-used meta) bodies))
                          ::symbol-introduced (set (mapcat (comp ::symbol-introduced meta) bodies))}))
     ;; scalar values: string, numbers, etc.
     v))
 
-(defmethod enhance-code clojure.lang.Symbol [acc s]
-  (if-let [iden (get acc s)]
+(defmethod enhance-code clojure.lang.Symbol [sym->iden s]
+  (if-let [iden (get sym->iden s)]
     (with-meta s {::symbol-identity iden, ::symbol-used #{iden}})
     s))
 
+;; TODO
 (doseq [t '[let* loop*]]
-  (defmethod enhance-code t [acc [_ bindings & bodies]]
-    (let [[acc introduced-idents bindings]
-          (reduce (fn [[acc introduced-idents mapped-bindings] [k v]]
+  (defmethod enhance-code t [sym->iden [_ bindings & bodies]]
+    (let [[sym->iden introduced-idents bindings]
+          (reduce (fn [[sym->iden introduced-idents mapped-bindings] [k v]]
                     (let [key-iden (gensym)]
-                      [(assoc acc k key-iden)
+                      [(assoc sym->iden k key-iden)
                        (conj introduced-idents key-iden)
-                       (conj mapped-bindings k (enhance-code acc v))]))
-                  [acc #{} []]
+                       (conj mapped-bindings k (enhance-code sym->iden v))]))
+                  [sym->iden #{} []]
                   (partition 2 bindings))
-          bodies      (for [body bodies] (enhance-code acc body))
+          bodies      (for [body bodies] (enhance-code sym->iden body))
           symbol-used (set (remove introduced-idents
                                    (mapcat (comp ::symbol-used meta)
                                            (concat bodies (partition 1 2 (next bindings))))))
@@ -629,15 +632,15 @@
          ::symbol-introduced symbol-introduced}))))
 
 ;; acc: map of symbol->iden
-(defmethod enhance-code 'fn* [acc fn-expression]
+(defmethod enhance-code 'fn* [sym->iden fn-expression]
+  (println :enhnancing-fn-expr sym->iden fn-expression (meta fn-expression))
   (let [[fname & fbodies] (parsed-fn fn-expression)
-        _ (println :>>> fname fbodies)
         fbodies (for [[args & bodies] fbodies
-                      :let [new-acc (cond-> (zipmap args (repeatedly gensym))
+                      :let [new-acc (cond-> (zipmap (remove #{'&} args) (repeatedly gensym))
                                       fname (assoc fname (gensym)))
                             new-acc-1 (zipmap (vals new-acc) (keys new-acc))
-                            acc (merge acc new-acc)
-                            bodies (for [b bodies] (enhance-code acc b))]]
+                            sym->iden (merge sym->iden new-acc)
+                            bodies (for [b bodies] (enhance-code sym->iden b))]]
                   (with-meta (list* args bodies)
                     {::symbol-used       (set (remove new-acc-1 (mapcat (comp ::symbol-used meta) bodies)))
                      ::symbol-introduced (set (keys new-acc-1)) ;; fname + args symbols
@@ -646,23 +649,23 @@
       ;; symbol-introduced is nil because it is a new closure!
       {::symbol-used (set (mapcat (comp ::symbol-used meta) fbodies))})))
 
-(defmethod enhance-code 'letfn* [acc [_ bindings bodies]]
+(defmethod enhance-code 'letfn* [sym->iden [_ bindings bodies]]
   ;; TODO: add acc
   nil)
 
 ;; set and vector: recursively run for all elements and merge meta keys
 (doseq [t [clojure.lang.IPersistentVector clojure.lang.IPersistentSet]]
-  (defmethod enhance-code t [acc v]
-    (let [elems (for [b v] (enhance-code acc b))]
+  (defmethod enhance-code t [sym->iden v]
+    (let [elems (for [b v] (enhance-code sym->iden b))]
       (with-meta (into (empty v) elems)
         {::symbol-used       (set (mapcat (comp ::symbol-used meta) elems))
          ::symbol-introduced (set (mapcat (comp ::symbol-introduced meta) elems))}))))
 
 (defn expand-and-eval [expr]
-  (let [expr     `((fn* [] ~expr))
+  (let [; expr     `((fn* [] ~expr))
         expanded (macroexpand-all-code expr)
-        enhanced (enhance-code expr)
-        node     (->eval-node {} expanded)]
+        enhanced (enhance-code {} expanded)
+        node     (->eval-node {} enhanced)]
     (evalme node basic-bindings)))
 
 (def evaluator expand-and-eval)
