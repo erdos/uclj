@@ -6,7 +6,7 @@
            [java.util.concurrent.atomic AtomicReferenceArray]))
 
 (set! *warn-on-reflection* true)
-
+#_
 (def basic-bindings
   {'clojure.lang.Var clojure.lang.Var
    'clojure.lang.LazySeq clojure.lang.LazySeq
@@ -32,7 +32,7 @@
 
 (run! require namespaces-to-require)
 
-(defn- array? [x] (.isArray (class x)))
+(defn- array? [x] (when x (.isArray (class x))))
 
 (defmacro template [expr]
   (letfn [(unroll [expr] (cond (seq? expr) (unroll-seq expr)
@@ -195,7 +195,10 @@
 (declare ->eval-node)
 
 ;; &a is a hash-map of identity-symbol to index in local bindings.
-(defmulti seq->eval-node (fn [&a recur-indices form] (first form)) :default ::default)
+(defmulti seq->eval-node (fn [iden->idx recur-indices form]
+                           (assert (map? iden->idx))
+                           (first form))
+  :default ::default)
 
 ;; return list of lists
 (defn- var->arglists [v]
@@ -328,9 +331,8 @@
 (def ^:private kvs-seq (repeatedly #(vector (gensym "k") (gensym "v"))))
 
 (defmethod seq->eval-node 'fn* seq-eval-fn [&a recur-indices form]
-  ; (println :!!! (meta form))
   (assert (meta form))
-    (let [[fname & bodies]      (parsed-fn form)
+  (let [[fname & bodies]      (parsed-fn form)
         &a                    (if fname (assoc &a fname ::fn-name-binding) &a)
         rest-def              (first (filter (fn [[args]] (some #{'&} args)) bodies))
         rest-def-butlast-args (drop-last 2 (first rest-def))
@@ -365,6 +367,7 @@
       ; (println :HELLO body0-symbols body1-symbols)
       (gen-eval-node
        (let [enclosed-array (object-array enclosed-count)]
+         ; (assert (array? &b) (str "No array: " (pr-str &b)))
          (doseq [[idx sym] (map vector (range) symbol-used)]
            (aset enclosed-array idx (aget #^objects &b (symbol->idx sym))))
          (fn
@@ -398,7 +401,7 @@
            ))))))
 
 (defmethod seq->eval-node 'let* seq-eval-let [iden->idx recur-indices [_ bindings & bodies]]
-  (println :seq->eval-node :let* iden->idx bindings (map meta bindings) (map meta bodies))
+  ; (println :seq->eval-node :let* iden->idx bindings (map meta bindings) (map meta bodies))
   (cond
     ;; can merge (let*) forms
     (and (= 1 (count bodies)) (seq? (first bodies)) (= 'let* (ffirst bodies)))
@@ -565,30 +568,28 @@
   (seq->eval-node &a nil (list* 'do bodies)))
 
 ;; TODO!
-(defmethod seq->eval-node 'try [&a recur-indices [_ & xs]]
+(defmethod seq->eval-node 'try [iden->idx recur-indices [_ & xs]]
   (let [catch-clauses  (keep (fn [x] (when (and (seq? x) (= 'catch (first x)))
                                        [(resolve (nth x 1)) ;; type
-                                        (nth x 2) ;; variable
-                                        (->eval-node (assoc &a (nth x 2) ::catch-var-binding)
-                                                     recur-indices
-                                                     (list* 'do (nthrest x 2)))]))
+                                        (-> (nth x 2) meta ::symbol-identity iden->idx)
+                                        (->eval-node iden->idx recur-indices (list* 'do (nthrest x 2)))]))
                              xs)
         bodies         (remove (fn [x] (and (seq? x) ('#{finally catch} (first x)))) xs)
-        body-node (seq->eval-node &a recur-indices (list* 'do bodies))
+        body-node      (seq->eval-node iden->idx recur-indices (list* 'do bodies))
         finally-node (some (fn [x] (when (and (seq? x) (= 'finally (first x)))
-                                     (->eval-node &a nil (list* 'do (next x))))) xs)]
+                                     (->eval-node iden->idx nil (list* 'do (next x))))) xs)]
     (gen-eval-node
      (try (evalme body-node &b)
           (catch Throwable t
-            (if-let [[_ v node] (some (fn [[c v node :as item]] (when (instance? c t) item)) catch-clauses)]
-              (evalme node (assoc &b v t))
+            (if-let [[_ idx node] (some (fn [[c v node :as item]] (when (instance? c t) item)) catch-clauses)]
+              (do (aset #^objects &b idx t)
+                  (evalme node &b))
               (throw t)))
           (finally (evalme finally-node &b))))))
 
 (defn sym->eval-node [iden->idx expr]
   (if-let [identity (::symbol-identity (meta expr))]
-    (let [_ (println :sym->eval-node iden->idx expr identity)
-          index (int (iden->idx identity))]
+    (let [index (int (iden->idx identity))]
       (gen-eval-node (aget #^objects &b index)))
     (if (var? (resolve expr))
       (let [^clojure.lang.Var resolved-expr (resolve expr)]
@@ -676,6 +677,34 @@
       ;; symbol-introduced is nil because it is a new closure!
       {::symbol-used (set (mapcat (comp ::symbol-used meta) fbodies))})))
 
+(defmethod enhance-code 'try [sym->iden [_ & xs]]
+  (let [bodies  (remove (fn [x] (and (seq? x) ('#{finally catch} (first x)))) xs)
+        catches (filter (fn [x] (and (seq? x) (= 'catch (first x)))) xs)
+        finally (some (fn [x] (when (and (seq? x) (= 'finally (first x))) x)) xs)
+        ,,,,,
+        catch-identity (gensym)
+        bodies  (for [body bodies] (enhance-code sym->iden body))
+        catches (for [[c t e & tail] catches
+                      :let [sym->iden (assoc sym->iden e catch-identity)]]
+                  (list* c t (with-meta e {::symbol-identity catch-identity})
+                         (for [body tail] (enhance-code sym->iden body))))
+        catch-metas    (for [[c t e & tail] catches, x tail] (meta x))
+        finally-bodies (seq (for [body (next finally)] (enhance-code sym->iden body)))]
+    (with-meta
+      (concat '[try]
+               bodies
+               catches
+               (when finally-bodies [(list* 'finally finally-bodies)]))
+      {::symbol-used (-> #{}
+                         (into (mapcat (comp ::symbol-used meta) bodies))
+                         (into (mapcat ::symbol-introduced catch-metas))
+                         (into (mapcat (comp ::symbol-used meta) finally-bodies)))
+       ::symbol-introduced (-> #{}
+                               (into (mapcat (comp ::symbol-introduced meta) bodies))
+                               (into (mapcat ::symbol-introduced catch-metas))
+                               (into (mapcat (comp ::symbol-introduced meta) finally-bodies))
+                               (cond-> (seq catches) (conj catch-identity)))})))
+
 (defmethod enhance-code 'letfn* [sym->iden [_ bindings bodies]]
   ;; TODO: add acc
   nil)
@@ -693,7 +722,8 @@
         expanded (macroexpand-all-code expr)
         enhanced (enhance-code {} expanded)
         node     (->eval-node {} nil enhanced)]
-    (evalme node basic-bindings)))
+    ;; array is empty yet.
+    (evalme node nil)))
 
 (def evaluator expand-and-eval)
 
