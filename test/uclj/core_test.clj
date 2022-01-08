@@ -13,6 +13,9 @@
     (is (= 4 (evaluator '(ffirst (let [a 4] {a :v})))))
     (is (= 4 (evaluator '(first (let [a 4] [a]))))))
 
+  (testing "asdf"
+    (is (fn? (evaluator '(let [b :lol] (fn [] (let [_ b] :hi)))))))
+
   (testing "Shadow lexical bindings"
     (is (= 4 (evaluator '(let [inc dec] (inc 5)))))))
 
