@@ -172,7 +172,7 @@
 (defrecord Recur [bindings])
 
 (defprotocol EvalNode
-  (evalme [this ^clojure.lang.IPersistentMap bindings]))
+  (evalme [this #^objects bindings]))
 
 ;; TODO: inst and uuid?
 (extend-protocol EvalNode
