@@ -7,6 +7,15 @@
   (is (= nil (evaluator '(let [a 1]))))
   (is (= 1 (evaluator '(let [a 1 b a] b))))
   (is (= 4 (evaluator '(let [a 2 b 3] (let [a 1] (+ a b))))))
+
+  (testing "Binding works across collections"
+    (is (= 4 (evaluator '(first (let [a 4] #{a})))))
+    (is (= 4 (evaluator '(ffirst (let [a 4] {a :v})))))
+    (is (= 4 (evaluator '(first (let [a 4] [a]))))))
+
+  (testing "asdf"
+    (is (fn? (evaluator '(let [b :lol] (fn [] (let [_ b] :hi)))))))
+
   (testing "Shadow lexical bindings"
     (is (= 4 (evaluator '(let [inc dec] (inc 5)))))))
 
@@ -42,6 +51,7 @@
 (defn unbound-value? [v] (instance? clojure.lang.Var$Unbound v))
 
 (deftest test-call-binary
+  #_(is (= () (evaluator '())))
   (is (= 23 (evaluator '(+ 20 3))))
   )
 
@@ -76,6 +86,13 @@
 (deftest test-fn-form
   (testing "Functin handle is bound"
     (is (fn? (evaluator '((fn f [a] f) 3)))))
+
+  (testing (= 16 (evaluator '(
+                (let [x 3 y 4]
+                  (fn []
+                    (let [f (fn ([a] (+ a x)) ([a b] (+ a b y))  )]
+                      (+ (f 1) (f 2 3)))))))))
+
   (testing "Returns argument"
     (is (= 1 (evaluator '((fn [a] a) 1))))
     (is (= 1 (evaluator '((fn [a b] a) 1 2))))
@@ -88,6 +105,9 @@
                    (div2 [x] (collatz (/ x 2)))
                    (add3 [x] (collatz (+ 1 (* 3 x))))]
              (collatz 12)))))
+
+  (testing "functions access context from outside"
+    (is (= 1 (evaluator '(let [a 1 b 2] (letfn [(x [] a) (y [] (x))] (x)))))))
   (testing "shadowed lexical binding"
     (is (= 4 (evaluator '(letfn [(inc [x] (dec x))] (inc 5)))))
     (is (= 4 (evaluator '(letfn [(a [x] (inc x)) (inc [x] (dec x))] (a 5)))))))
@@ -97,7 +117,16 @@
     (is (= 2 (evaluator '(loop [i 1 j (inc i)] j))))))
 
 (deftest test-case
-  ;; (is (= :one (evaluator '(case 1 1 :one 2 :two 3 :three 4))))
+  (is (= :one (evaluator '(case 1 1 :one 2 :two 3 :three 4))))
+
+  (testing "can recur from case"
+    (testing "recur in default branch"
+      (is (= :one (evaluator '(loop [i 12] (case i 0 :one (recur (dec i))))))))
+    (testing "recur from branch"
+      (is (= :two (evaluator '(loop [i 4] (case i (1 2 3 4) (recur (dec i)) :two))))))
+    #_(testing "Cannot recur from expression"
+      (is (thrown? AssertionError ;; TODO: throw other exception type!
+                   (evaluator '(loop [i 2] (case (recur (dec i)) 1 1 2 2 :three)))))))
 
   (testing "Identity checking because all cases are keywords"
     (testing "All keys have different hashes"
@@ -139,7 +168,7 @@
     (is (some? (evaluator '(let [a 42] (clojure.core.async/go a))))))
 
   ;; has macro bindings
-  (is (= 3 (evaluator '(let [a (clojure.core.async/go 1)
+  #_(is (= 3 (evaluator '(let [a (clojure.core.async/go 1)
                              b (clojure.core.async/go 2)]
                          (clojure.core.async/<!!
                           (clojure.core.async/go
