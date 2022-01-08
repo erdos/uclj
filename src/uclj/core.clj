@@ -364,8 +364,8 @@
     (let [symbol-used         (::symbol-used (meta form))
           enclosed-count      (count symbol-used)
           enclosed-array-size (int (if fname (inc enclosed-count) enclosed-count))
-          [body0 body1 body2] (map arity->body-node (range))
-          [body0-symbols body1-symbols body2-symbols] (map (comp ::fn-sym-introduced meta arity->def) (range))]
+          [body0 body1 body2 body3] (map arity->body-node (range))
+          [body0-symbols body1-symbols body2-symbols body3-symbols] (map (comp ::fn-sym-introduced meta arity->def) (range))]
       (assert (set? symbol-used))
       (gen-eval-node
        ;; the enclosed-array contains enclosed context
@@ -405,6 +405,19 @@
                (aset invocation-array (+ 1 enclosed-array-size) y)
                (loop []
                  (let [result (evalme body2 invocation-array)]
+                   (if (identical? ::recur result)
+                     (recur)
+                     result)))))
+            ([x y z]
+             (assert body3-symbols)
+             (let [invocation-array (java.util.Arrays/copyOf
+                                     enclosed-array (+ (count body3-symbols) enclosed-array-size))]
+               ;; also: fill f with arguments
+               (aset invocation-array (+ 0 enclosed-array-size) x)
+               (aset invocation-array (+ 1 enclosed-array-size) y)
+               (aset invocation-array (+ 2 enclosed-array-size) z)
+               (loop []
+                 (let [result (evalme body3 invocation-array)]
                    (if (identical? ::recur result)
                      (recur)
                      result)))))
