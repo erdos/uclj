@@ -51,6 +51,7 @@
 (defn unbound-value? [v] (instance? clojure.lang.Var$Unbound v))
 
 (deftest test-call-binary
+  (is (= () (evaluator '())))
   (is (= 23 (evaluator '(+ 20 3))))
   )
 
