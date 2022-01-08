@@ -53,7 +53,11 @@
 (deftest test-call-binary
   (is (= () (evaluator '())))
   (is (= 23 (evaluator '(+ 20 3))))
-  )
+
+  (testing "used vars in case are correctly encapsulated in closure"
+    (is (= 7 (evaluator '(let [a 2] ((fn [t] (inc (+ t a))) 4))))))
+
+  :ok)
 
 (deftest test-def
   (testing "Def form declares var"
@@ -127,6 +131,10 @@
     (testing "Cannot recur from expression"
       (is (thrown? AssertionError ;; TODO: throw other exception type!
                    (evaluator '(loop [i 2] (case (recur (dec i)) 1 1 2 2 :three)))))))
+
+  (testing "used vars in case are correctly encapsulated in closure"
+    (is (= :ok 
+          (evaluator '(let [a :ok b :w1 c :w2] ((fn [t] (case t, 1 a, 2 b, c)) 1))))))
 
   (testing "Identity checking because all cases are keywords"
     (testing "All keys have different hashes"
