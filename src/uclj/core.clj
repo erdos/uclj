@@ -441,33 +441,23 @@
   (assert (even? (count bindings)))
   (assert (vector? (::symbol-loop (meta def))))
   (assert (every? symbol? (::symbol-loop (meta def))))
-  (let [[arg1-node arg2-node arg3-node] (for [[k v] (partition 2 bindings)] (->eval-node iden->idx nil v))
+  (let [[node0 node1 node2 node3 node4 node5] (for [[k v] (partition 2 bindings)] (->eval-node iden->idx nil v))
         recur-indices                   (mapv iden->idx (::symbol-loop (meta def)))
         body-node                       (seq->eval-node iden->idx recur-indices (list* 'do bodies))
-        [idx1 idx2 idx3]                recur-indices]
-    (case (count bindings)
-      4 (gen-eval-node
-         (do (aset #^objects &b idx1 (evalme arg1-node &b))
-             (aset #^objects &b idx2 (evalme arg2-node &b))
-             (loop []
-               (let [result (evalme body-node &b)]
-                 (if (identical? ::recur result)
-                   (recur)
-                   result)))))
-
-      2 (gen-eval-node
-         (do (aset #^objects &b idx1 (evalme arg1-node &b))
-             (loop []
-               (let [result (evalme body-node &b)]
-                 (if (identical? ::recur result)
-                   (recur)
-                   result)))))
-      0 (gen-eval-node
-         (do (loop []
-               (let [result (evalme body-node &b)]
-                 (if (identical? ::recur result)
-                   (recur)
-                   result))))))))
+        [idx0 idx1 idx2 idx3 idx4 idx5] recur-indices]
+    (template
+      (case (count bindings)
+        ~@(mapcat seq
+                  (for [i (range 6)]
+                    [(* 2 i)
+                      `(gen-eval-node
+                        (do ~@(for [i (range i)]
+                                `(aset ~'&b ~(symbol (str "idx" i)) (evalme ~(symbol (str "node" i)) ~'&b )))
+                            (loop []
+                             (let [result# (evalme ~'body-node ~'&b)]
+                              (if (identical? ::recur result#)
+                                (recur)
+                                result#)))))]))))))
 
 (defmethod seq->eval-node 'new seq-eval-new [&a recur-indices [_ class-name & args]]
   (let [clz (symbol->class class-name)
@@ -650,9 +640,7 @@
     ;; scalar values: string, numbers, etc.
     v))
 
-#_(defmethod enhance-code 'case* [sym->iden [_ value shift mask default-value imap switch-type mode skip-check]]
-  (let [])
-  )
+;; (defmethod enhance-code 'case* [sym->iden [_ value shift mask default-value imap switch-type mode skip-check]])
 
 (defmethod enhance-code clojure.lang.Symbol [sym->iden s]
   (if-let [iden (get sym->iden s)]
