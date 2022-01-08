@@ -315,14 +315,18 @@
               (evalme last-body &b))))))))
 
 (defmethod seq->eval-node 'letfn* seq-eval-letfn [iden->idx recur-indices [_ bindings & bodies :as form]]
-  (let [idx-node-pairs (doall (for [[k f] (partition 2 bindings)]
-                                [(-> k meta ::symbol-identity iden->idx int)
-                                 (->eval-node iden->idx recur-indices f)]))
+  (let [promises (for [[k f] (partition 2 bindings)
+                       :let [v (volatile! nil)]]
+                   [(-> k meta ::symbol-identity iden->idx int)
+                    (->eval-node iden->idx nil f)
+                    (fn [x] (vreset! v x))
+                    (fn [& args] (apply @v args))])
         body-node (->eval-node iden->idx recur-indices (list* 'do bodies))]
-
     (gen-eval-node
-     (do (doseq [[idx node] idx-node-pairs]
-           (aset #^objects &b idx (evalme node &b)))
+     (do (doseq [[idx _ _ afn] promises]
+           (aset #^objects &b idx afn))
+         (doseq [[_ node deliver _] promises]
+           (deliver (evalme node &b)))
          (evalme body-node &b)))))
 
 (def ^:private kvs-seq (repeatedly #(vector (gensym "k") (gensym "v"))))
@@ -359,7 +363,7 @@
                              (assoc m (count args) def)) {} bodies)]
     (let [symbol-used         (::symbol-used (meta form))
           enclosed-count      (count symbol-used)
-          enclosed-array-size (if fname (inc enclosed-count) enclosed-count)
+          enclosed-array-size (int (if fname (inc enclosed-count) enclosed-count))
           [body0 body1 body2] (map arity->body-node (range))
           [body0-symbols body1-symbols body2-symbols] (map (comp ::fn-sym-introduced meta arity->def) (range))]
       (assert (set? symbol-used))
