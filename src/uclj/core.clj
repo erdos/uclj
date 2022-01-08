@@ -377,6 +377,7 @@
          (->
           (fn
             ([]
+             (assert body0-symbols)
              (let [invocation-array (java.util.Arrays/copyOf
                                      enclosed-array (+ (count body0-symbols) enclosed-array-size))]
                (loop []
@@ -385,6 +386,7 @@
                      (recur)
                      result)))))
             ([x]
+             (assert body1-symbols)
              (let [invocation-array (java.util.Arrays/copyOf
                                      enclosed-array (+ (count body1-symbols) enclosed-array-size))]
                ;; also: fill f with arguments
@@ -395,6 +397,7 @@
                      (recur)
                      result)))))
             ([x y]
+             (assert body2-symbols)
              (let [invocation-array (java.util.Arrays/copyOf
                                      enclosed-array (+ (count body2-symbols) enclosed-array-size))]
                ;; also: fill f with arguments
