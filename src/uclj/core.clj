@@ -231,18 +231,20 @@
                                (list (vec args) (list 'gen-eval-node (list* (symbol v) (for [a args] (list 'evalme a '&b))))))))])))))
 
 (defmethod seq->eval-node ::default seq-eval-call [&a _ s]
-  (let [[f & args] (map (partial ->eval-node &a nil) s)
-        [a1 a2 a3 a4 a5 a6 a7] args]
-    (dorun args)
-    (if-let [call-factory (clojure-core-inlined-fns (::var (meta f)))]
-      (apply call-factory args)
-      (template
-       (case (count args)
-         ~@(for [i (range 8)]
-             [i (list 'gen-eval-node (list* '.invoke (quote ^clojure.lang.IFn (evalme f &b))
-                                             (for [j (range 1 (inc i))] (list 'evalme (symbol (str 'a j)) '&b))))])
-         ;; else
-         (gen-eval-node (apply (evalme f &b) (for [e args] (evalme e &b)))))))))
+  (if (empty? s)
+    (gen-eval-node ())
+    (let [[f & args] (map (partial ->eval-node &a nil) s)
+          [a1 a2 a3 a4 a5 a6 a7] args]
+      (dorun args)
+      (if-let [call-factory (clojure-core-inlined-fns (::var (meta f)))]
+        (apply call-factory args)
+        (template
+        (case (count args)
+          ~@(for [i (range 8)]
+              [i (list 'gen-eval-node (list* '.invoke (quote ^clojure.lang.IFn (evalme f &b))
+                                              (for [j (range 1 (inc i))] (list 'evalme (symbol (str 'a j)) '&b))))])
+          ;; else
+          (gen-eval-node (apply (evalme f &b) (for [e args] (evalme e &b))))))))))
 
 (defmethod seq->eval-node 'quote seq-eval-quote [_ _ [_ quoted]] (gen-eval-node quoted))
 
