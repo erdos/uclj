@@ -497,9 +497,25 @@
                              v2 (evalme n2 &b)]
                          (aset #^objects &b i1 v1)
                          (aset #^objects &b i2 v2)
-                         ::recur)))
+                         ::recur))
+      3 (gen-eval-node (let [v1 (evalme n1 &b)
+                             v2 (evalme n2 &b)
+                             v3 (evalme n3 &b)]
+                         (aset #^objects &b i1 v1)
+                         (aset #^objects &b i2 v2)
+                         (aset #^objects &b i3 v3)
+                         ::recur))
+      4 (gen-eval-node (let [v1 (evalme n1 &b)
+                             v2 (evalme n2 &b)
+                             v3 (evalme n3 &b)
+                             v4 (evalme n4 &b)]
+                         (aset #^objects &b i1 v1)
+                         (aset #^objects &b i2 v2)
+                         (aset #^objects &b i3 v3)
+                         (aset #^objects &b i4 v4)
+                         ::recur))
     ;; TODO: more arities with template!
-    ))
+    )))
 
 (defmethod seq->eval-node 'throw [&a _ [_ e :as form]]
   (assert (= 2 (count form)))
