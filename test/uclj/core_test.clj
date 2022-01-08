@@ -7,6 +7,12 @@
   (is (= nil (evaluator '(let [a 1]))))
   (is (= 1 (evaluator '(let [a 1 b a] b))))
   (is (= 4 (evaluator '(let [a 2 b 3] (let [a 1] (+ a b))))))
+
+  (testing "Binding works across collections"
+    (is (= 4 (evaluator '(first (let [a 4] #{a})))))
+    (is (= 4 (evaluator '(ffirst (let [a 4] {a :v})))))
+    (is (= 4 (evaluator '(first (let [a 4] [a]))))))
+
   (testing "Shadow lexical bindings"
     (is (= 4 (evaluator '(let [inc dec] (inc 5)))))))
 
@@ -103,7 +109,10 @@
     (testing "recur in default branch"
       (is (= :one (evaluator '(loop [i 12] (case i 0 :one (recur (dec i))))))))
     (testing "recur from branch"
-      (is (= :two (evaluator '(loop [i 4] (case i (1 2 3 4) (recur (dec i)) :two)))))))
+      (is (= :two (evaluator '(loop [i 4] (case i (1 2 3 4) (recur (dec i)) :two))))))
+    (testing "Cannot recur from expression"
+      (is (thrown? AssertionError ;; TODO: throw other exception type!
+                   (evaluator '(loop [i 2] (case (recur (dec i)) 1 1 2 2 :three)))))))
 
   (testing "Identity checking because all cases are keywords"
     (testing "All keys have different hashes"
