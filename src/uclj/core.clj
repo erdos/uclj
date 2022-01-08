@@ -422,15 +422,10 @@
                                            (nnext (first bodies))))
 
     :else
-    (let [[[idx0 node0]
-           [idx1 node1]
-           [idx2 node2]
-           [idx3 node3]
-           [idx4 node4]
-           [idx5 node5]
-           [idx6 node6]] (for [[k v] (partition 2 bindings)]
-                           [(int (iden->idx (::symbol-identity (meta k))))
-                            (->eval-node iden->idx nil v)])
+    (let [[[idx0 node0] [idx1 node1] [idx2 node2] [idx3 node3] [idx4 node4] [idx5 node5] [idx6 node6]]
+          (for [[k v] (partition 2 bindings)]
+            [(int (iden->idx (::symbol-identity (meta k))))
+             (->eval-node iden->idx nil v)])
           body-node (seq->eval-node iden->idx recur-indices (list* 'do bodies))]
       (template
        (case (count bindings)
@@ -438,53 +433,9 @@
                    (for [i (range 7)]
                      [(* 2 i)
                       `(gen-eval-node
-                        (do
-                          ~@(for [i (range i)]
-                              `(aset ~'&b ~(symbol (str"idx" i)) (evalme ~(symbol (str"node" i)) ~'&b )))
-                          (evalme ~'body-node ~'&b)))]))))
-      #_
-      (case (count bindings)
-        0 body-node
-
-        2 (gen-eval-node
-           (do (aset #^objects &b idx1 (evalme node1 &b))
-               (evalme body-node &b)))
-        4 (gen-eval-node
-           (do (aset #^objects &b idx1 (evalme node1 &b))
-               (aset #^objects &b idx2 (evalme node2 &b))
-               (evalme body-node &b)))
-        6 (gen-eval-node
-           (do (aset #^objects &b idx1 (evalme node1 &b))
-               (aset #^objects &b idx2 (evalme node2 &b))
-               (aset #^objects &b idx3 (evalme node3 &b))
-               (evalme body-node &b)))
-
-        8 (gen-eval-node
-           (do (aset #^objects &b idx1 (evalme node1 &b))
-               (aset #^objects &b idx2 (evalme node2 &b))
-               (aset #^objects &b idx3 (evalme node3 &b))
-               (aset #^objects &b idx4 (evalme node4 &b))
-               (evalme body-node &b)))
-
-        10 (gen-eval-node
-            (do (aset #^objects &b idx1 (evalme node1 &b))
-                (aset #^objects &b idx2 (evalme node2 &b))
-                (aset #^objects &b idx3 (evalme node3 &b))
-                (aset #^objects &b idx4 (evalme node4 &b))
-                (aset #^objects &b idx5 (evalme node5 &b))
-                (evalme body-node &b)))
-
-        12 (gen-eval-node
-            (do (aset #^objects &b idx1 (evalme node1 &b))
-                (aset #^objects &b idx2 (evalme node2 &b))
-                (aset #^objects &b idx3 (evalme node3 &b))
-                (aset #^objects &b idx4 (evalme node4 &b))
-                (aset #^objects &b idx5 (evalme node5 &b))
-                (aset #^objects &b idx6 (evalme node6 &b))
-                (evalme body-node &b)))
-
-
-        ))))
+                        (do ~@(for [i (range i)]
+                                `(aset ~'&b ~(symbol (str "idx" i)) (evalme ~(symbol (str "node" i)) ~'&b )))
+                            (evalme ~'body-node ~'&b)))])))))))
 
 (defmethod seq->eval-node 'loop* seq-eval-loop [iden->idx _ [_ bindings & bodies :as def]]
   (assert (even? (count bindings)))
