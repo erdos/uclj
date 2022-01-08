@@ -349,7 +349,7 @@
                                   {})
                                 (for [[args & bodies :as def] bodies
                                       :let [iden->idx (zipmap (concat (::symbol-used (meta def))
-                                                                      (::symbol-introduced (meta def)))
+                                                                      (::fn-sym-introduced (meta def)))
                                                               (range))
                                             recur-indices (mapv iden->idx (::symbol-loop (meta def)))]]
                                   [(count args) (->eval-node iden->idx recur-indices (list* 'do bodies))]))
@@ -358,7 +358,7 @@
     (let [symbol-used    (::symbol-used (meta form))
           enclosed-count (count symbol-used)
           [body0 body1 body2] (map arity->body-node (range))
-          [body0-symbols body1-symbols body2-symbols] (map (comp ::symbol-introduced meta arity->def) (range))]
+          [body0-symbols body1-symbols body2-symbols] (map (comp ::fn-sym-introduced meta arity->def) (range))]
       (assert (set? symbol-used))
       (gen-eval-node
        (let [enclosed-array (object-array enclosed-count)]
@@ -659,18 +659,20 @@
 (defmethod enhance-code 'fn* [sym->iden fn-expression]
   (let [[fname & fbodies] (parsed-fn fn-expression)
         fbodies (for [[args & bodies] fbodies
-                      :let [new-acc   (cond-> (zipmap (remove #{'&} args) (repeatedly gensym))
+                      :let [arg-syms  (remove #{'&} args)
+                            new-acc   (cond-> (zipmap arg-syms (repeatedly gensym))
                                         fname (assoc fname (gensym)))
                             new-acc-1 (zipmap (vals new-acc) (keys new-acc))
                             sym->iden (merge sym->iden new-acc)
                             bodies    (for [body bodies] (enhance-code sym->iden body))
-                            args      (mapv (fn [s] (with-meta s {::symbol-identity (new-acc s)})) args)]]
+                            args      (mapv (fn [s] (with-meta s {::symbol-identity (new-acc s)})) args)
+                            symbol-loop (mapv new-acc arg-syms)]]
                   (with-meta (list* args bodies)
                     {::symbol-used       (set (remove new-acc-1 (mapcat (comp ::symbol-used meta) bodies)))
-                     ::symbol-introduced (into (set (keys new-acc-1))
-                                               ;; TODO: also add fn name when needed!!!
-                                               (mapcat (comp ::symbol-introduced meta) bodies))
-                     ::symbol-loop (mapv new-acc args)
+                     ::fn-sym-introduced (-> symbol-loop
+                                             (cond-> fname (conj (new-acc fname)))
+                                             (into (set (mapcat (comp ::symbol-introduced meta) bodies))))
+                     ::symbol-loop       symbol-loop
                      #_(set (keys new-acc-1))}))]
     (with-meta (if fname (list* 'fn* fname fbodies) (list* 'fn* fbodies))
       ;; symbol-introduced is nil because it is a new closure!
@@ -718,7 +720,6 @@
                           (set))
         symbol-introduced (-> #{}
                               (into (mapcat (comp ::symbol-introduced meta) bodies))
-                              (into (map (comp sym->iden first) binding-pairs))
                               (into symbol-added))]
     (with-meta
       (list* letfn* (vec (apply concat binding-pairs)) bodies)
