@@ -696,7 +696,7 @@
                (when finally-bodies [(list* 'finally finally-bodies)]))
       {::symbol-used (-> #{}
                          (into (mapcat (comp ::symbol-used meta) bodies))
-                         (into (mapcat ::symbol-introduced catch-metas))
+                         (into (mapcat ::symbol-used catch-metas))
                          (into (mapcat (comp ::symbol-used meta) finally-bodies)))
        ::symbol-introduced (-> #{}
                                (into (mapcat (comp ::symbol-introduced meta) bodies))
@@ -704,7 +704,7 @@
                                (into (mapcat (comp ::symbol-introduced meta) finally-bodies))
                                (cond-> (seq catches) (conj catch-identity)))})))
 
-(defmethod enhance-code 'letfn* [sym->iden [_ bindings & bodies]]
+(defmethod enhance-code 'letfn* [sym->iden [letfn* bindings & bodies]]
   (let [sym->iden     (merge sym->iden (zipmap (take-nth 2 bindings) (repeatedly gensym)))
         binding-pairs (for [[var fndef] (partition 2 bindings)]
                         [(with-meta var {::symbol-identity (sym->iden var)})
@@ -721,7 +721,7 @@
                               (into (map (comp sym->iden first) binding-pairs))
                               (into symbol-added))]
     (with-meta
-      (list* 'letfn* (vec (apply concat binding-pairs)) bodies)
+      (list* letfn* (vec (apply concat binding-pairs)) bodies)
       {::symbol-used symbol-used
        ::symbol-introduced symbol-introduced})))
 
