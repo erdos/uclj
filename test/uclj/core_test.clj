@@ -8,6 +8,8 @@
   (is (= 1 (evaluator '(let [a 1 b a] b))))
   (is (= 4 (evaluator '(let [a 2 b 3] (let [a 1] (+ a b))))))
 
+  (is (= "ax" (evaluator '(((let [a "a"] (fn fff ([] fff) ([x] (str a x))))) "x"))))
+
   (testing "Binding works across collections"
     (is (= 4 (evaluator '(first (let [a 4] #{a})))))
     (is (= 4 (evaluator '(ffirst (let [a 4] {a :v})))))
