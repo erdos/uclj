@@ -99,6 +99,12 @@
 (deftest test-case
   (is (= :one (evaluator '(case 1 1 :one 2 :two 3 :three 4))))
 
+  (testing "can recur from case"
+    (testing "recur in default branch"
+      (is (= :one (evaluator '(loop [i 12] (case i 0 :one (recur (dec i))))))))
+    (testing "recur from branch"
+      (is (= :two (evaluator '(loop [i 4] (case i (1 2 3 4) (recur (dec i)) :two)))))))
+
   (testing "Identity checking because all cases are keywords"
     (testing "All keys have different hashes"
       (is (= 2 (evaluator '(case :b, :a 1 :b 2 :c 3, :_)))))
