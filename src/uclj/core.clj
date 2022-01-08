@@ -349,52 +349,62 @@
                                   {})
                                 (for [[args & bodies :as def] bodies
                                       :let [iden->idx (zipmap (concat (::symbol-used (meta def))
+                                                                      (when-let [i (::fn-sym-own (meta def))]
+                                                                        [i])
                                                                       (::fn-sym-introduced (meta def)))
                                                               (range))
                                             recur-indices (mapv iden->idx (::symbol-loop (meta def)))]]
                                   [(count args) (->eval-node iden->idx recur-indices (list* 'do bodies))]))
         arity->def (reduce (fn [m [args & bodies :as def]]
                              (assoc m (count args) def)) {} bodies)]
-    (let [symbol-used    (::symbol-used (meta form))
-          enclosed-count (count symbol-used)
+    (let [symbol-used         (::symbol-used (meta form))
+          enclosed-count      (count symbol-used)
+          enclosed-array-size (if fname (inc enclosed-count) enclosed-count)
           [body0 body1 body2] (map arity->body-node (range))
           [body0-symbols body1-symbols body2-symbols] (map (comp ::fn-sym-introduced meta arity->def) (range))]
       (assert (set? symbol-used))
       (gen-eval-node
-       (let [enclosed-array (object-array enclosed-count)]
+       ;; the enclosed-array contains enclosed context
+       (let [enclosed-array (object-array enclosed-array-size)]
          (doseq [[idx sym] (map vector (range) symbol-used)
                  :let [index (int (iden->idx sym))
                        proto (aget #^objects &b index)]]
            (aset enclosed-array idx proto))
-         (fn
-           ([]
-            (let [invocation-array (java.util.Arrays/copyOf enclosed-array (+ (count body0-symbols) enclosed-count))]
-              (loop []
-                (let [result (evalme body0 invocation-array)]
-                  (if (identical? ::recur result)
-                    (recur)
-                    result)))))
-           ([x]
-            (let [invocation-array (java.util.Arrays/copyOf enclosed-array (+ (count body1-symbols) enclosed-count))]
-              ;; also: fill f with arguments
-              (aset invocation-array (+ 0 enclosed-count) x)
-              (loop []
-                (let [result (evalme body1 invocation-array)]
-                  (if (identical? ::recur result)
-                    (recur)
-                    result)))))
-           ([x y]
-            (let [invocation-array (java.util.Arrays/copyOf enclosed-array (+ (count body2-symbols) enclosed-count))]
-              ;; also: fill f with arguments
-              (aset invocation-array (+ 0 enclosed-count) x)
-              (aset invocation-array (+ 1 enclosed-count) y)
-              (loop []
-                (let [result (evalme body2 invocation-array)]
-                  (if (identical? ::recur result)
-                    (recur)
-                    result)))))
-           ;; TODO: generate for all arities
-           ))))))
+         (->
+          (fn
+            ([]
+             (let [invocation-array (java.util.Arrays/copyOf
+                                     enclosed-array (+ (count body0-symbols) enclosed-array-size))]
+               (loop []
+                 (let [result (evalme body0 invocation-array)]
+                   (if (identical? ::recur result)
+                     (recur)
+                     result)))))
+            ([x]
+             (let [invocation-array (java.util.Arrays/copyOf
+                                     enclosed-array (+ (count body1-symbols) enclosed-array-size))]
+               ;; also: fill f with arguments
+               (aset invocation-array (+ 0 enclosed-array-size) x)
+               (loop []
+                 (let [result (evalme body1 invocation-array)]
+                   (if (identical? ::recur result)
+                     (recur)
+                     result)))))
+            ([x y]
+             (let [invocation-array (java.util.Arrays/copyOf
+                                     enclosed-array (+ (count body2-symbols) enclosed-array-size))]
+               ;; also: fill f with arguments
+               (aset invocation-array (+ 0 enclosed-array-size) x)
+               (aset invocation-array (+ 1 enclosed-array-size) y)
+               (loop []
+                 (let [result (evalme body2 invocation-array)]
+                   (if (identical? ::recur result)
+                     (recur)
+                     result)))))
+            ;; TODO: generate for all arities
+            )
+          ;; ha van fname, akkor az enclosed-array utolso eleme legyen
+          (doto (cond->> fname (aset #^objects enclosed-array (dec enclosed-array-size))))))))))
 
 (defmethod seq->eval-node 'let* seq-eval-let [iden->idx recur-indices [_ bindings & bodies]]
   ; (println :seq->eval-node :let* iden->idx bindings (map meta bindings) (map meta bodies))
@@ -669,8 +679,9 @@
                             symbol-loop (mapv new-acc arg-syms)]]
                   (with-meta (list* args bodies)
                     {::symbol-used       (set (remove new-acc-1 (mapcat (comp ::symbol-used meta) bodies)))
+                     ::fn-sym-own        (new-acc fname)
                      ::fn-sym-introduced (-> symbol-loop
-                                             (cond-> fname (conj (new-acc fname)))
+                                             ; (cond-> fname (conj (new-acc fname)))
                                              (into (set (mapcat (comp ::symbol-introduced meta) bodies))))
                      ::symbol-loop       symbol-loop
                      #_(set (keys new-acc-1))}))]
