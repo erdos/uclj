@@ -131,7 +131,7 @@
 
   )
 
-
+#_
 (deftest test-core-async
   (is (= 34 (evaluator '(clojure.core.async/<!! (clojure.core.async/go 34)))))
 
