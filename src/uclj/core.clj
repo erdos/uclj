@@ -373,7 +373,7 @@
        (let [enclosed-array (object-array enclosed-array-size)]
          (doseq [[idx sym] (map vector (range) symbol-used)
                  :let [index (int (iden->idx sym))
-                       proto (aget #^objects &b index)]]
+                       proto (aget &b index)]]
            (aset enclosed-array idx proto))
          (->
           (fn
@@ -387,7 +387,11 @@
                      (recur)
                      result)))))
             ([x]
-             (assert body1-symbols)
+            ;; there is no such arity defined!
+             (assert body1-symbols
+               (str "Should not hav been invoked!"
+                    (pr-str x) (pr-str form) \newline (pr-str (meta form)))
+             )
              (let [invocation-array (java.util.Arrays/copyOf
                                      enclosed-array (+ (count body1-symbols) enclosed-array-size))]
                ;; also: fill f with arguments
@@ -495,28 +499,28 @@
     (case (count nodes)
       0 (gen-eval-node (let [] ::recur))
       1 (gen-eval-node (let [v1 (evalme n1 &b)]
-                         (aset #^objects &b i1 v1)
+                         (aset &b i1 v1)
                          ::recur))
       2 (gen-eval-node (let [v1 (evalme n1 &b)
                              v2 (evalme n2 &b)]
-                         (aset #^objects &b i1 v1)
-                         (aset #^objects &b i2 v2)
+                         (aset &b i1 v1)
+                         (aset &b i2 v2)
                          ::recur))
       3 (gen-eval-node (let [v1 (evalme n1 &b)
                              v2 (evalme n2 &b)
                              v3 (evalme n3 &b)]
-                         (aset #^objects &b i1 v1)
-                         (aset #^objects &b i2 v2)
-                         (aset #^objects &b i3 v3)
+                         (aset &b i1 v1)
+                         (aset &b i2 v2)
+                         (aset &b i3 v3)
                          ::recur))
       4 (gen-eval-node (let [v1 (evalme n1 &b)
                              v2 (evalme n2 &b)
                              v3 (evalme n3 &b)
                              v4 (evalme n4 &b)]
-                         (aset #^objects &b i1 v1)
-                         (aset #^objects &b i2 v2)
-                         (aset #^objects &b i3 v3)
-                         (aset #^objects &b i4 v4)
+                         (aset &b i1 v1)
+                         (aset &b i2 v2)
+                         (aset &b i3 v3)
+                         (aset &b i4 v4)
                          ::recur))
     ;; TODO: more arities with template!
     )))
