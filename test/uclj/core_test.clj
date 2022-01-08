@@ -20,6 +20,10 @@
     (is (= 4 (evaluator '(let [inc dec] (inc 5)))))))
 
 (deftest test-eval-try
+  (testing "try-catch maintains sybol usage across closure"
+      (is (= 2 (evaluator '(let [a 1 b 2 c 3]
+                              ((fn [] (try (inc a) (catch RuntimeException e (inc b)) (finally (inc c))))))))))
+
   (is (= 2 (evaluator '(try 1 2 (finally 3)))))
   (is (= [0 0 2] (evaluator '(let [a (atom 0)] [@a (try @a (finally (reset! a 2))) @a]))))
   (is (= 1 (evaluator '(try 1 (catch Throwable t t)))))
