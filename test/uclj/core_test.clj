@@ -95,9 +95,9 @@
 (deftest test-loop-form
   (testing "Bindings are like with let"
     (is (= 2 (evaluator '(loop [i 1 j (inc i)] j))))))
-#_
+
 (deftest test-case
-  ;; (is (= :one (evaluator '(case 1 1 :one 2 :two 3 :three 4))))
+  (is (= :one (evaluator '(case 1 1 :one 2 :two 3 :three 4))))
 
   (testing "Identity checking because all cases are keywords"
     (testing "All keys have different hashes"

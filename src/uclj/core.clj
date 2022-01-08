@@ -640,10 +640,27 @@
     ;; scalar values: string, numbers, etc.
     v))
 
+#_(defmethod enhance-code 'case* [sym->iden [_ value shift mask default-value imap switch-type mode skip-check]]
+  (let [])
+  )
+
 (defmethod enhance-code clojure.lang.Symbol [sym->iden s]
   (if-let [iden (get sym->iden s)]
     (with-meta s {::symbol-identity iden, ::symbol-used #{iden}})
     s))
+
+(doseq [t [clojure.lang.IPersistentVector clojure.lang.IPersistentSet]]
+  (defmethod enhance-code t [sym->iden coll]
+    (let [elems (for [c coll] (enhance-code sym->iden c))]
+      (with-meta             (into (empty coll) elems)
+        {::symbol-used       (set (mapcat (comp ::symbol-used meta) elems))
+         ::symbol-introduced (set (mapcat (comp ::symbol-introduced meta) elems))}))))
+
+(defmethod enhance-code clojure.lang.IPersistentMap [sym->iden coll]
+  (let [elems (for [kv coll, c kv] (enhance-code sym->iden c))]
+    (with-meta             (apply hash-map elems)
+      {::symbol-used       (set (mapcat (comp ::symbol-used meta) elems))
+       ::symbol-introduced (set (mapcat (comp ::symbol-introduced meta) elems))})))
 
 ;; TODO
 (doseq [t '[let* loop*]]
@@ -721,8 +738,7 @@
                                (into (mapcat (comp ::symbol-introduced meta) bodies))
                                (into (mapcat ::symbol-introduced catch-metas))
                                (into (mapcat (comp ::symbol-introduced meta) finally-bodies))
-                               (cond-> (seq catches) (conj catch-identity))
-                               (doto (->> (println :symbol-introduced))))})))
+                               (cond-> (seq catches) (conj catch-identity)))})))
 
 (defmethod enhance-code 'letfn* [sym->iden [letfn* bindings & bodies]]
   (let [sym->iden     (merge sym->iden (zipmap (take-nth 2 bindings) (repeatedly gensym)))
