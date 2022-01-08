@@ -364,8 +364,7 @@
         arity->def (reduce (fn [m [args & bodies :as def]]
                              (assoc m (count args) def)) {} bodies)]
     (let [symbol-used         (::symbol-used (meta form))
-          enclosed-count      (count symbol-used)
-          enclosed-array-size (int (if fname (inc enclosed-count) enclosed-count))
+          enclosed-array-size (int (if fname (inc (count symbol-used)) (count symbol-used)))
           [body0 body1 body2 body3] (map arity->body-node (range))
           [body0-symbols body1-symbols body2-symbols body3-symbols] (map (comp ::fn-sym-introduced meta arity->def) (range))]
       (assert (set? symbol-used))
