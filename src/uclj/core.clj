@@ -699,12 +699,15 @@
       {::symbol-used (-> #{}
                          (into (mapcat (comp ::symbol-used meta) bodies))
                          (into (mapcat ::symbol-used catch-metas))
-                         (into (mapcat (comp ::symbol-used meta) finally-bodies)))
+                         (into (mapcat (comp ::symbol-used meta) finally-bodies))
+                         (->> (remove #{catch-identity}))
+                         (set))
        ::symbol-introduced (-> #{}
                                (into (mapcat (comp ::symbol-introduced meta) bodies))
                                (into (mapcat ::symbol-introduced catch-metas))
                                (into (mapcat (comp ::symbol-introduced meta) finally-bodies))
-                               (cond-> (seq catches) (conj catch-identity)))})))
+                               (cond-> (seq catches) (conj catch-identity))
+                               (doto (->> (println :symbol-introduced))))})))
 
 (defmethod enhance-code 'letfn* [sym->iden [letfn* bindings & bodies]]
   (let [sym->iden     (merge sym->iden (zipmap (take-nth 2 bindings) (repeatedly gensym)))
