@@ -410,8 +410,7 @@
           ;; ha van fname, akkor az enclosed-array utolso eleme legyen
           (doto (cond->> fname (aset #^objects enclosed-array (dec enclosed-array-size))))))))))
 
-(defmethod seq->eval-node 'let* seq-eval-let [iden->idx recur-indices [_ bindings & bodies]]
-  ; (println :seq->eval-node :let* iden->idx bindings (map meta bindings) (map meta bodies))
+(defmethod seq->eval-node 'let* seq-eval-let [iden->idx recur-indices [_ bindings & bodies :as form]]
   (cond
     ;; can merge (let*) forms
     (and (= 1 (count bodies)) (seq? (first bodies)) (= 'let* (ffirst bodies)))
@@ -422,7 +421,10 @@
     :else
     (let [[[idx1 node1]
            [idx2 node2]
-           [idx3 node3]] (for [[k v] (partition 2 bindings)]
+           [idx3 node3]
+           [idx4 node4]
+           [idx5 node5]
+           [idx6 node6]] (for [[k v] (partition 2 bindings)]
                            [(int (iden->idx (::symbol-identity (meta k))))
                             (->eval-node iden->idx nil v)])
           body-node (seq->eval-node iden->idx recur-indices (list* 'do bodies))]
@@ -440,7 +442,34 @@
            (do (aset #^objects &b idx1 (evalme node1 &b))
                (aset #^objects &b idx2 (evalme node2 &b))
                (aset #^objects &b idx3 (evalme node3 &b))
-               (evalme body-node &b)))))))
+               (evalme body-node &b)))
+
+        8 (gen-eval-node
+           (do (aset #^objects &b idx1 (evalme node1 &b))
+               (aset #^objects &b idx2 (evalme node2 &b))
+               (aset #^objects &b idx3 (evalme node3 &b))
+               (aset #^objects &b idx4 (evalme node4 &b))
+               (evalme body-node &b)))
+
+        10 (gen-eval-node
+            (do (aset #^objects &b idx1 (evalme node1 &b))
+                (aset #^objects &b idx2 (evalme node2 &b))
+                (aset #^objects &b idx3 (evalme node3 &b))
+                (aset #^objects &b idx4 (evalme node4 &b))
+                (aset #^objects &b idx5 (evalme node5 &b))
+                (evalme body-node &b)))
+
+        12 (gen-eval-node
+            (do (aset #^objects &b idx1 (evalme node1 &b))
+                (aset #^objects &b idx2 (evalme node2 &b))
+                (aset #^objects &b idx3 (evalme node3 &b))
+                (aset #^objects &b idx4 (evalme node4 &b))
+                (aset #^objects &b idx5 (evalme node5 &b))
+                (aset #^objects &b idx6 (evalme node6 &b))
+                (evalme body-node &b)))
+
+
+        ))))
 
 (defmethod seq->eval-node 'loop* seq-eval-loop [iden->idx _ [_ bindings & bodies :as def]]
   (assert (even? (count bindings)))
@@ -557,7 +586,6 @@
     (let [sym-node (->eval-node &a nil nssym)]
       (gen-eval-node
        (let [new-ns (create-ns (evalme sym-node &b))]
-         ; (println :>! new-ns)
          (alter-meta! (var *ns*) assoc :dynamic true)
          (try
            ;; works in Clojure REPL but does not compile with graal!
@@ -678,7 +706,7 @@
           bodies      (for [body bodies] (enhance-code sym->iden body))
           symbol-used (set (remove introduced-idents
                                    (mapcat (comp ::symbol-used meta)
-                                           (concat bodies (partition 1 2 (next bindings))))))
+                                           (concat bodies (take-nth 2 (next bindings))))))
           symbol-introduced (-> introduced-idents
                                 (into (mapcat (comp ::symbol-introduced meta) bodies))
                                 (into (mapcat (comp ::symbol-introduced meta) bindings)))]
