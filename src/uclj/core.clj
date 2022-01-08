@@ -190,7 +190,7 @@
 ;; TODO: test with interfaces instead of protocols!
 (defmacro gen-eval-node
   ([m body] `(with-meta (gen-eval-node ~body) ~m))
-  ([body] `(reify EvalNode (evalme [_ ~'&b] ~body))))
+  ([body] `(reify EvalNode (evalme [_ ~'&b] (let [~(quote #^objects &b) ~'&b] ~body)))))
 
 (declare ->eval-node)
 
@@ -324,7 +324,7 @@
         body-node (->eval-node iden->idx recur-indices (list* 'do bodies))]
     (gen-eval-node
      (do (doseq [[idx _ _ afn] promises]
-           (aset #^objects &b idx afn))
+           (aset &b idx afn))
          (doseq [[_ node deliver _] promises]
            (deliver (evalme node &b)))
          (evalme body-node &b)))))
@@ -422,7 +422,8 @@
                                            (nnext (first bodies))))
 
     :else
-    (let [[[idx1 node1]
+    (let [[[idx0 node0]
+           [idx1 node1]
            [idx2 node2]
            [idx3 node3]
            [idx4 node4]
@@ -431,6 +432,17 @@
                            [(int (iden->idx (::symbol-identity (meta k))))
                             (->eval-node iden->idx nil v)])
           body-node (seq->eval-node iden->idx recur-indices (list* 'do bodies))]
+      (template
+       (case (count bindings)
+         ~@(mapcat seq
+                   (for [i (range 7)]
+                     [(* 2 i)
+                      `(gen-eval-node
+                        (do
+                          ~@(for [i (range i)]
+                              `(aset ~'&b ~(symbol (str"idx" i)) (evalme ~(symbol (str"node" i)) ~'&b )))
+                          (evalme ~'body-node ~'&b)))]))))
+      #_
       (case (count bindings)
         0 body-node
 
