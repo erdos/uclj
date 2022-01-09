@@ -135,7 +135,7 @@
     (testing "recur from branch"
       (is (= :two (evaluator '(loop [i 4] (case i (1 2 3 4) (recur (dec i)) :two))))))
     (testing "Cannot recur from expression"
-      (is (thrown? AssertionError ;; TODO: throw other exception type!
+      (is (thrown? UnsupportedOperationException ;; TODO: throw other exception type!
                    (evaluator '(loop [i 2] (case (recur (dec i)) 1 1 2 2 :three)))))))
 
   (testing "used vars in case are correctly encapsulated in closure"

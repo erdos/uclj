@@ -483,8 +483,10 @@
 (def ^:private index-symbols (for [i (range)] (symbol (str 'index i))))
 
 (defmethod seq->eval-node 'recur seq-eval-recur [iden->idx recur-indices [_ & values]]
-  (assert recur-indices "Recur is not in tail position!")
-  (assert (= (count recur-indices) (count values)) "Recur argument count mismatch!")
+  (when-not recur-indices
+    (throw (new UnsupportedOperationException "Can only recur from tail position")))
+  (when-not (= (count recur-indices) (count values))
+    (throw (new IllegalArgumentException (str "Mismatched argument count to recur, expected: " (count recur-indices) " args, got: " (count values)))))
   (template
     (case (count ~'recur-indices)
       ~@(mapcat seq
