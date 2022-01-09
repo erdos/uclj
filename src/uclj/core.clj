@@ -337,15 +337,15 @@
   (assert (integer? max-arity))
   (assert (symbol? symbol-used))
   `(let [~'enclosed-array-size                                            (int (if ~fname (inc (count ~symbol-used)) (count ~symbol-used)))
-         [~@(for [i (range max-arity)] (symbol (str 'body i)))]           (map ~arity->body-node (range))
-         [~@(for [i (range max-arity)] (symbol (str 'body i '-symbols)))] (map ~arity->symbols-introduced (range))]
+         [~@(for [i (range (inc max-arity))] (symbol (str 'body i)))]           (map ~arity->body-node (range))
+         [~@(for [i (range (inc max-arity))] (symbol (str 'body i '-symbols)))] (map ~arity->symbols-introduced (range))]
     (gen-eval-node
         ;; the enclosed-array contains enclosed context
         (let [~'enclosed-array (object-array ~'enclosed-array-size)]
           (reduce-kv (fn [_# new-idx# old-idx#] (aset ~'enclosed-array new-idx# (aget ~'&b old-idx#))) nil ~new-idx->old-idx)
           (doto (do
                     (fn
-                      ~@(for [i (range 4)
+                      ~@(for [i (range (inc max-arity))
                               :let [syms (repeatedly i gensym)]]
                           (list (vec syms)
                                 `(let [~'invocation-array (java.util.Arrays/copyOf
@@ -363,7 +363,13 @@
 (defn- make-fn-body [fname symbol-used arity->body-node arity->def iden->idx]
   (let [new-idx->old-idx (mapv iden->idx symbol-used)
         arity->symbols-introduced (into {} (for [i (range 20)] [i (::fn-sym-introduced (meta (arity->def i)))]))]
-    (make-fn-body-upto-arity 5 fname symbol-used new-idx->old-idx arity->body-node arity->symbols-introduced)
+    (case (count arity->def)
+      0 (make-fn-body-upto-arity 1 fname symbol-used new-idx->old-idx arity->body-node arity->symbols-introduced)
+      1 (make-fn-body-upto-arity 2 fname symbol-used new-idx->old-idx arity->body-node arity->symbols-introduced)
+      2 (make-fn-body-upto-arity 3 fname symbol-used new-idx->old-idx arity->body-node arity->symbols-introduced)
+      3 (make-fn-body-upto-arity 4 fname symbol-used new-idx->old-idx arity->body-node arity->symbols-introduced)
+;;   etc
+    )
     ))
 
 (defmethod seq->eval-node 'fn* seq-eval-fn [iden->idx recur-indices form]
