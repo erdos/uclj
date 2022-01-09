@@ -333,6 +333,7 @@
 
 (def ^:private kvs-seq (repeatedly #(vector (gensym "k") (gensym "v"))))
 
+;; max-arity: [0-20)
 (defmacro ^:private make-fn-body-upto-arity [max-arity fname symbol-used new-idx->old-idx arity->body-node arity->symbols-introduced]
   (assert (integer? max-arity))
   (assert (symbol? symbol-used))
@@ -346,22 +347,22 @@
         (let [~'enclosed-array (object-array ~'enclosed-array-size)]
           (reduce-kv (fn [_# new-idx# old-idx#] (aset ~'enclosed-array new-idx# (aget ~'&b old-idx#))) nil ~new-idx->old-idx)
           (doto (fn ~@(for [i (range (inc max-arity))
-                            :let [syms (repeatedly i gensym)]]
-                        (list (vec syms)
+                            :let [arg-symbols (repeatedly i gensym)]]
+                        (list (vec arg-symbols)
                               `(assert ~(symbol (str 'body i '-symbols)) "Called with too many parameters!")
                               `(let [~'invocation-array (java.util.Arrays/copyOf
                                                           ~'enclosed-array (+ (count ~(symbol (str 'body i '-symbols))) ~'enclosed-array-size))]
                                   ~@(for [j (range i)]
-                                      (list 'aset 'invocation-array (list '+ j 'enclosed-array-size) (nth syms j)))
+                                      (list 'aset 'invocation-array (list '+ j 'enclosed-array-size) (nth arg-symbols j)))
                                     (loop []
                                       (let [result# (evalme ~(symbol (str 'body i)) ~'invocation-array)]
                                         (if (identical? ::recur result#)
                                           (recur)
                                           result#))))))
-                   ([~@(for [i (range (inc max-arity))] (symbol (str 'arg- i))) ~'& arg-rest#]
+                 #_  ([~@(for [i (range (inc max-arity))] (symbol (str 'arg- i))) ~'& arg-rest#]
                        (assert body-vararg-symbols# "Called with too many parameters!")
                        (let [~'invocation-array (java.util.Arrays/copyOf ~'enclosed-array (+ (count body-vararg-symbols#) ~'enclosed-array-size))]
-                          ~@(for [j (range (inc max-arity))]
+                          ~@(for [j (range (+ max-arity))]
                               (list 'aset 'invocation-array (list '+ j 'enclosed-array-size) (symbol (str 'arg- j))))
                             (aset ~'invocation-array (+ ~max-arity ~'enclosed-array-size) arg-rest#)
                             (loop []
@@ -375,9 +376,9 @@
 (defn- make-fn-body [fname symbol-used arity->body-node arity->symbols-introduced iden->idx]
   (let [new-idx->old-idx          (mapv iden->idx symbol-used)]
     (template
-      (case (count (dissoc arity->body-node :variadic))
+      (case (apply max (keys (dissoc arity->body-node :variadic)))
         ~@(mapcat seq (for [i (range 19)]
-                         [i (list 'do (list 'make-fn-body-upto-arity (inc i) 'fname 'symbol-used 'new-idx->old-idx 'arity->body-node 'arity->symbols-introduced))]))))))
+                         [i (list 'do (list 'make-fn-body-upto-arity i 'fname 'symbol-used 'new-idx->old-idx 'arity->body-node 'arity->symbols-introduced))]))))))
 
 (defmethod seq->eval-node 'fn* seq-eval-fn [iden->idx recur-indices form]
   (assert (meta form))
