@@ -333,6 +333,37 @@
 
 (def ^:private kvs-seq (repeatedly #(vector (gensym "k") (gensym "v"))))
 
+(defn make-fn-body-upto-arity [max-arity fname symbol-used new-idx->old-idx arity->body-node arity->symbols-introduced]
+  (let [enclosed-array-size (int (if fname (inc (count symbol-used)) (count symbol-used)))
+        [body0 body1 body2 body3] (map arity->body-node (range))
+        [body0-symbols body1-symbols body2-symbols body3-symbols] (map arity->symbols-introduced (range))]
+    (gen-eval-node
+        ;; the enclosed-array contains enclosed context
+        (let [enclosed-array (object-array enclosed-array-size)]
+          (reduce-kv (fn [_ new-idx old-idx] (aset enclosed-array new-idx (aget &b old-idx))) nil new-idx->old-idx)
+          (doto (template
+                    (fn
+                      ~@(for [i (range 4)
+                              :let [syms (repeatedly i gensym)]]
+                          (list (vec syms)
+                                `(let [~'invocation-array (java.util.Arrays/copyOf
+                                                            ~'enclosed-array (+ (count ~(symbol (str 'body i '-symbols))) ~'enclosed-array-size))]
+                                  ~@(for [j (range i)]
+                                        (list 'aset 'invocation-array (list '+ j 'enclosed-array-size) (nth syms j)))
+                                    (loop []
+                                      (let [result# (evalme ~(symbol (str 'body i)) ~'invocation-array)]
+                                        (if (identical? ::recur result#)
+                                          (recur)
+                                          result#))))))))
+            (cond->> fname (aset #^objects enclosed-array (dec enclosed-array-size))))))))
+
+
+(defn- make-fn-body [fname symbol-used arity->body-node arity->def iden->idx]
+  (let [new-idx->old-idx (mapv iden->idx symbol-used)
+        arity->symbols-introduced (into {} (for [i (range 20)] [i (::fn-sym-introduced (meta (arity->def i)))]))]
+    (make-fn-body-upto-arity 5 fname symbol-used new-idx->old-idx arity->body-node arity->symbols-introduced)
+    ))
+
 (defmethod seq->eval-node 'fn* seq-eval-fn [iden->idx recur-indices form]
   (assert (meta form))
   (let [[fname & bodies]      (parsed-fn form)
@@ -361,31 +392,8 @@
                                             recur-indices (mapv iden->idx (::symbol-loop (meta def)))]]
                                   [(count args) (->eval-node iden->idx recur-indices (list* 'do bodies))]))
         arity->def (reduce (fn [m [args & bodies :as def]]
-                             (assoc m (count args) def)) {} bodies)
-      
-        new-idx->old-idx (mapv iden->idx symbol-used)]
-    (let [enclosed-array-size (int (if fname (inc (count symbol-used)) (count symbol-used)))
-          [body0 body1 body2 body3] (map arity->body-node (range))
-          [body0-symbols body1-symbols body2-symbols body3-symbols] (map (comp ::fn-sym-introduced meta arity->def) (range))]
-      (gen-eval-node
-       ;; the enclosed-array contains enclosed context
-       (let [enclosed-array (object-array enclosed-array-size)]
-         (reduce-kv (fn [_ new-idx old-idx] (aset enclosed-array new-idx (aget &b old-idx))) nil new-idx->old-idx)
-         (doto (template
-                  (fn
-                    ~@(for [i (range 4)
-                            :let [syms (repeatedly i gensym)]]
-                        (list (vec syms)
-                              `(let [~'invocation-array (java.util.Arrays/copyOf
-                                                          ~'enclosed-array (+ (count ~(symbol (str 'body i '-symbols))) ~'enclosed-array-size))]
-                                ~@(for [j (range i)]
-                                      (list 'aset 'invocation-array (list '+ j 'enclosed-array-size) (nth syms j)))
-                                  (loop []
-                                    (let [result# (evalme ~(symbol (str 'body i)) ~'invocation-array)]
-                                      (if (identical? ::recur result#)
-                                        (recur)
-                                        result#))))))))
-           (cond->> fname (aset #^objects enclosed-array (dec enclosed-array-size)))))))))
+                             (assoc m (count args) def)) {} bodies)]
+    (make-fn-body fname symbol-used arity->body-node arity->def iden->idx)))
 
 (defmethod seq->eval-node 'let* seq-eval-let [iden->idx recur-indices [_ bindings & bodies :as form]]
   (cond
