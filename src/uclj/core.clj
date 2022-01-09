@@ -522,8 +522,6 @@
              (clojure.lang.Reflector/invokeInstanceMethod
               (evalme target &b) (name field) (into-array Object (for [a args] (evalme a &b)))))))))))
 
-(declare expand-and-eval)
-
 (doseq [lf '[in-ns clojure.core/in-ns]]
   (defmethod seq->eval-node lf [&a _ [_ nssym]]
     (let [sym-node (->eval-node &a nil nssym)]
@@ -537,6 +535,7 @@
              ;; compiles but does nothing in REPL
              (.doReset (var *ns*) new-ns))))))))
 
+(declare evaluator)
 (doseq [lf '[clojure.core/load-file load-file]]
   (defmethod seq->eval-node lf [&a _ [_ fname]]
     (let [arg (->eval-node &a nil fname)]
@@ -544,7 +543,7 @@
        (with-open [in (new java.io.PushbackReader (io/reader (io/file (evalme arg &b))))]
          (doseq [read (repeatedly #(read {:eof ::eof} in))
                  :while (not= ::eof read)]
-           (expand-and-eval read)))))))
+           (evaluator read)))))))
 
 (defmethod seq->eval-node 'clojure.core/with-loading-context [&a _ [_ & bodies]]
   ;; needed by (ns) forms
