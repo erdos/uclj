@@ -333,7 +333,7 @@
 
 (def ^:private kvs-seq (repeatedly #(vector (gensym "k") (gensym "v"))))
 
-(defmacro make-fn-body-upto-arity [max-arity fname symbol-used new-idx->old-idx arity->body-node arity->symbols-introduced]
+(defmacro ^:private make-fn-body-upto-arity [max-arity fname symbol-used new-idx->old-idx arity->body-node arity->symbols-introduced]
   (assert (integer? max-arity))
   (assert (symbol? symbol-used))
   `(let [~'enclosed-array-size                                            (int (if ~fname (inc (count ~symbol-used)) (count ~symbol-used)))
@@ -343,21 +343,19 @@
         ;; the enclosed-array contains enclosed context
         (let [~'enclosed-array (object-array ~'enclosed-array-size)]
           (reduce-kv (fn [_# new-idx# old-idx#] (aset ~'enclosed-array new-idx# (aget ~'&b old-idx#))) nil ~new-idx->old-idx)
-          (doto (do
-                    (fn
-                      ~@(for [i (range (inc max-arity))
-                              :let [syms (repeatedly i gensym)]]
-                          (list (vec syms)
-                                `(let [~'invocation-array (java.util.Arrays/copyOf
-                                                            ~'enclosed-array (+ (count ~(symbol (str 'body i '-symbols))) ~'enclosed-array-size))]
+          (doto (fn ~@(for [i (range (inc max-arity))
+                            :let [syms (repeatedly i gensym)]]
+                        (list (vec syms)
+                              `(let [~'invocation-array (java.util.Arrays/copyOf
+                                                          ~'enclosed-array (+ (count ~(symbol (str 'body i '-symbols))) ~'enclosed-array-size))]
                                   (assert ~(symbol (str 'body i '-symbols)) "Called with too many parameters!")
                                   ~@(for [j (range i)]
-                                        (list 'aset 'invocation-array (list '+ j 'enclosed-array-size) (nth syms j)))
+                                      (list 'aset 'invocation-array (list '+ j 'enclosed-array-size) (nth syms j)))
                                     (loop []
                                       (let [result# (evalme ~(symbol (str 'body i)) ~'invocation-array)]
                                         (if (identical? ::recur result#)
                                           (recur)
-                                          result#))))))))
+                                          result#)))))))
             (cond->> ~fname (aset #^objects ~'enclosed-array (dec ~'enclosed-array-size))))))))
 
 
