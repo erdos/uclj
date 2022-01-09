@@ -760,7 +760,7 @@
         {::symbol-used       (set (mapcat (comp ::symbol-used meta) elems))
          ::symbol-introduced (set (mapcat (comp ::symbol-introduced meta) elems))}))))
 
-(defn expand-and-eval [expr]
+(defn evaluator [expr]
   (let [expr     `((fn* [] ~expr))
         expanded (macroexpand-all-code expr)
         enhanced (enhance-code {} expanded)
@@ -768,15 +768,13 @@
     ;; array is empty yet.
     (evalme node nil)))
 
-(def evaluator expand-and-eval)
-
 (defn -main [& args]
   (cond
     (and (first args) (.startsWith (str (first args)) "("))
-    (println (expand-and-eval (read-string (first args))))
+    (println (evaluator (read-string (first args))))
 
     (and (first args) (.exists (io/file (first args))))
-    (expand-and-eval `(load-file ~(first args)))
+    (evaluator `(load-file ~(first args)))
 
     :else ;; interactive mode
     (do (println "Welcome to the small interpreter!")
@@ -784,14 +782,9 @@
           (print "$ ") (flush)
           (let [read (read {:eof ::eof} *in*)]
             (when-not (= ::eof read)
-              (try (println (expand-and-eval read))
+              (try (println (evaluator read))
                    (catch Throwable t (.printStackTrace t)))
               (recur))))
         (println "EOF, bye!"))))
 
-(comment
-
-  ;; to test core async:
-  (let [a (clojure.core.async/go 1)] (clojure.core.async/<!! (clojure.core.async/go (+ 1 (clojure.core.async/<! a)))))
-
-  )
+:OK
