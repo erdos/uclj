@@ -406,20 +406,20 @@
                                            (nnext (first bodies))))
 
     :else
-    (let [[[idx0 node0] [idx1 node1] [idx2 node2] [idx3 node3] [idx4 node4] [idx5 node5] [idx6 node6]]
-          (for [[k v] (partition 2 bindings)]
-            [(int (iden->idx (::symbol-identity (meta k))))
-             (->eval-node iden->idx nil v)])
-          body-node (seq->eval-node iden->idx recur-indices (list* 'do bodies))]
-      (template
-       (case (count bindings)
-         ~@(mapcat seq
-                   (for [i (range 7)]
-                     [(* 2 i)
-                      `(gen-eval-node
-                        (do ~@(for [i (range i)]
-                                `(aset ~'&b ~(symbol (str "idx" i)) (evalme ~(symbol (str "node" i)) ~'&b )))
-                            (evalme ~'body-node ~'&b)))])))))))
+    (template
+      (let [[~@(for [i (range 20)], [(symbol (str 'idx i)) (symbol (str 'node i))])]
+            (for [[k v] (partition 2 bindings)]
+              [(int (iden->idx (::symbol-identity (meta k))))
+              (->eval-node iden->idx nil v)])
+            body-node (seq->eval-node iden->idx recur-indices (list* 'do bodies))]
+        (case (count bindings)
+          ~@(mapcat seq
+                    (for [i (range 20)]
+                      [(* 2 i)
+                        `(gen-eval-node
+                          (do ~@(for [i (range i)]
+                                  `(aset ~'&b ~(symbol (str "idx" i)) (evalme ~(symbol (str "node" i)) ~'&b )))
+                              (evalme ~'body-node ~'&b)))])))))))
 
 (defmethod seq->eval-node 'loop* seq-eval-loop [iden->idx _ [_ bindings & bodies :as def]]
   (assert (even? (count bindings)))
