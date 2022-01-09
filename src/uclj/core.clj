@@ -249,12 +249,12 @@
       (gen-eval-node (if (evalme condition &b) (evalme then &b) (evalme else &b)))
       (gen-eval-node (if (evalme condition &b) (evalme then &b))))))
 
-(defmethod seq->eval-node 'def seq-eval-def [&a recur-indices [_ def-name & def-bodies]]
+(defmethod seq->eval-node 'def seq-eval-def [&a _ [_ def-name & def-bodies]]
   (let [[docstring def-value] (if (= 2 (count def-bodies))
                                 def-bodies
                                 [nil (first def-bodies)])
         var-object ^clojure.lang.Var (intern *ns* def-name)
-        value-node (->eval-node &a recur-indices def-value)]
+        value-node (->eval-node &a nil def-value)]
     (when (:dynamic (meta def-name))
       (.setDynamic var-object))
     (if (not-empty def-bodies)
