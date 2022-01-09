@@ -371,68 +371,21 @@
        ;; the enclosed-array contains enclosed context
        (let [enclosed-array (object-array enclosed-array-size)]
          (reduce-kv (fn [_ new-idx old-idx] (aset enclosed-array new-idx (aget &b old-idx))) nil new-idx->old-idx)
-         (->
-          (template
-            (fn
-              ~@(for [i (range 4)
-                      :let [syms (repeatedly i gensym)]]
-                   (list (vec syms)
-                         `(let [~'invocation-array (java.util.Arrays/copyOf
-                                                    ~'enclosed-array (+ (count ~(symbol (str 'body i '-symbols))) ~'enclosed-array-size))]
-                           ~@(for [j (range i)]
-                                (list 'aset 'invocation-array (list '+ j 'enclosed-array-size) (nth syms j)))
-                            (loop []
-                              (let [result# (evalme ~(symbol (str 'body i)) ~'invocation-array)]
-                                (if (identical? ::recur result#)
-                                  (recur)
-                                  result#))))))))
-          #_
-          (fn
-            ([]
-             (let [invocation-array (java.util.Arrays/copyOf
-                                     enclosed-array (+ (count body0-symbols) enclosed-array-size))]
-               (loop []
-                 (let [result (evalme body0 invocation-array)]
-                   (if (identical? ::recur result)
-                     (recur)
-                     result)))))
-            ([x]
-             (let [invocation-array (java.util.Arrays/copyOf
-                                     enclosed-array (+ (count body1-symbols) enclosed-array-size))]
-               ;; also: fill f with arguments
-               (aset invocation-array (+ 0 enclosed-array-size) x)
-               (loop []
-                 (let [result (evalme body1 invocation-array)]
-                   (if (identical? ::recur result)
-                     (recur)
-                     result)))))
-            ([x y]
-             (let [invocation-array (java.util.Arrays/copyOf
-                                     enclosed-array (+ (count body2-symbols) enclosed-array-size))]
-               ;; also: fill f with arguments
-               (aset invocation-array (+ 0 enclosed-array-size) x)
-               (aset invocation-array (+ 1 enclosed-array-size) y)
-               (loop []
-                 (let [result (evalme body2 invocation-array)]
-                   (if (identical? ::recur result)
-                     (recur)
-                     result)))))
-            ([x y z]
-             (assert body3-symbols) ;; to check that arity exists!
-             (let [invocation-array (java.util.Arrays/copyOf
-                                     enclosed-array (+ (count body3-symbols) enclosed-array-size))]
-               ;; also: fill f with arguments
-               (aset invocation-array (+ 0 enclosed-array-size) x)
-               (aset invocation-array (+ 1 enclosed-array-size) y)
-               (aset invocation-array (+ 2 enclosed-array-size) z)
-               (loop []
-                 (let [result (evalme body3 invocation-array)]
-                   (if (identical? ::recur result)
-                     (recur)
-                     result)))))
-            ;; TODO: generate for all arities
-            )
-          (doto (cond->> fname (aset #^objects enclosed-array (dec enclosed-array-size))))))))))
+         (doto (template
+                  (fn
+                    ~@(for [i (range 4)
+                            :let [syms (repeatedly i gensym)]]
+                        (list (vec syms)
+                              `(let [~'invocation-array (java.util.Arrays/copyOf
+                                                          ~'enclosed-array (+ (count ~(symbol (str 'body i '-symbols))) ~'enclosed-array-size))]
+                                ~@(for [j (range i)]
+                                      (list 'aset 'invocation-array (list '+ j 'enclosed-array-size) (nth syms j)))
+                                  (loop []
+                                    (let [result# (evalme ~(symbol (str 'body i)) ~'invocation-array)]
+                                      (if (identical? ::recur result#)
+                                        (recur)
+                                        result#))))))))
+           (cond->> fname (aset #^objects enclosed-array (dec enclosed-array-size)))))))))
 
 (defmethod seq->eval-node 'let* seq-eval-let [iden->idx recur-indices [_ bindings & bodies :as form]]
   (cond
