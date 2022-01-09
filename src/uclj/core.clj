@@ -486,19 +486,18 @@
   (assert recur-indices "Recur is not in tail position!")
   (assert (= (count recur-indices) (count values)) "Recur argument count mismatch!")
   (template
-    (let [nodes (map (partial ->eval-node iden->idx nil) values)]
-      (case (count nodes)
-        ~@(mapcat seq
-            (for [i (range 20)
-                  :let [node-symbols (take i node-symbols)
-                        index-symbols (take i index-symbols)]]
-              [i
-               `(let [[~@node-symbols]  ~'nodes
-                      [~@index-symbols] ~'recur-indices]
-                  (gen-eval-node
-                    (let [~@(interleave node-symbols (for [n node-symbols] (list 'evalme n '&b)))]
-                      ~@(map (partial list 'aset '&b) index-symbols node-symbols)
-                      ::recur)))]))))))
+    (case (count ~'recur-indices)
+      ~@(mapcat seq
+          (for [i (range 20)
+                :let [node-symbols  (take i node-symbols)
+                      index-symbols (take i index-symbols)]]
+            [i
+              `(let [[~@node-symbols]  (map (partial ->eval-node ~'iden->idx nil) ~'values)
+                     [~@index-symbols] ~'recur-indices]
+                 (gen-eval-node
+                   (let [~@(interleave node-symbols (for [n node-symbols] (list 'evalme n '&b)))]
+                     ~@(map (partial list 'aset '&b) index-symbols node-symbols)
+                     ::recur)))])))))
 
 (defmethod seq->eval-node 'throw [&a _ [_ e :as form]]
   (assert (= 2 (count form)))
