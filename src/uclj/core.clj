@@ -350,6 +350,7 @@
                           (list (vec syms)
                                 `(let [~'invocation-array (java.util.Arrays/copyOf
                                                             ~'enclosed-array (+ (count ~(symbol (str 'body i '-symbols))) ~'enclosed-array-size))]
+                                  (assert ~(symbol (str 'body i '-symbols)) "Called with too many parameters!")
                                   ~@(for [j (range i)]
                                         (list 'aset 'invocation-array (list '+ j 'enclosed-array-size) (nth syms j)))
                                     (loop []
@@ -361,16 +362,12 @@
 
 
 (defn- make-fn-body [fname symbol-used arity->body-node arity->def iden->idx]
-  (let [new-idx->old-idx (mapv iden->idx symbol-used)
+  (let [new-idx->old-idx          (mapv iden->idx symbol-used)
         arity->symbols-introduced (into {} (for [i (range 20)] [i (::fn-sym-introduced (meta (arity->def i)))]))]
-    (case (count arity->def)
-      0 (make-fn-body-upto-arity 1 fname symbol-used new-idx->old-idx arity->body-node arity->symbols-introduced)
-      1 (make-fn-body-upto-arity 2 fname symbol-used new-idx->old-idx arity->body-node arity->symbols-introduced)
-      2 (make-fn-body-upto-arity 3 fname symbol-used new-idx->old-idx arity->body-node arity->symbols-introduced)
-      3 (make-fn-body-upto-arity 4 fname symbol-used new-idx->old-idx arity->body-node arity->symbols-introduced)
-;;   etc
-    )
-    ))
+    (template
+      (case (count arity->def)
+        ~@(mapcat seq (for [i (range 20)]
+                         [i  (list 'make-fn-body-upto-arity (inc i) 'fname 'symbol-used 'new-idx->old-idx 'arity->body-node 'arity->symbols-introduced)]))))))
 
 (defmethod seq->eval-node 'fn* seq-eval-fn [iden->idx recur-indices form]
   (assert (meta form))
