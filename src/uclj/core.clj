@@ -359,11 +359,10 @@
             (cond->> ~fname (aset #^objects ~'enclosed-array (dec ~'enclosed-array-size))))))))
 
 
-(defn- make-fn-body [fname symbol-used arity->body-node arity->def iden->idx]
-  (let [new-idx->old-idx          (mapv iden->idx symbol-used)
-        arity->symbols-introduced (into {} (for [i (range 20)] [i (::fn-sym-introduced (meta (arity->def i)))]))]
+(defn- make-fn-body [fname symbol-used arity->body-node arity->symbols-introduced iden->idx]
+  (let [new-idx->old-idx          (mapv iden->idx symbol-used)]
     (template
-      (case (count arity->def)
+      (case (count arity->body-node)
         ~@(mapcat seq (for [i (range 20)]
                          [i  (list 'make-fn-body-upto-arity (inc i) 'fname 'symbol-used 'new-idx->old-idx 'arity->body-node 'arity->symbols-introduced)]))))))
 
@@ -395,8 +394,9 @@
                                             recur-indices (mapv iden->idx (::symbol-loop (meta def)))]]
                                   [(count args) (->eval-node iden->idx recur-indices (list* 'do bodies))]))
         arity->def (reduce (fn [m [args & bodies :as def]]
-                             (assoc m (count args) def)) {} bodies)]
-    (make-fn-body fname symbol-used arity->body-node arity->def iden->idx)))
+                             (assoc m (count args) def)) {} bodies)
+        arity->symbols-introduced (into {} (for [i (range 20)] [i (::fn-sym-introduced (meta (arity->def i)))]))]
+    (make-fn-body fname symbol-used arity->body-node arity->symbols-introduced iden->idx)))
 
 (defmethod seq->eval-node 'let* seq-eval-let [iden->idx recur-indices [_ bindings & bodies :as form]]
   (cond
