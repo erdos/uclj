@@ -6,11 +6,6 @@
            [java.util.concurrent.atomic AtomicReferenceArray]))
 
 (set! *warn-on-reflection* true)
-#_
-(def basic-bindings
-  {'clojure.lang.Var clojure.lang.Var
-   'clojure.lang.LazySeq clojure.lang.LazySeq
-   'java.util.concurrent.atomic.AtomicReferenceArray java.util.concurrent.atomic.AtomicReferenceArray})
 
 (def namespaces-to-require
   '[[clojure.core]
@@ -31,8 +26,6 @@
     ])
 
 (run! require namespaces-to-require)
-
-(defn- array? [x] (when x (.isArray (class x))))
 
 (defmacro template [expr]
   (letfn [(unroll [expr] (cond (seq? expr) (unroll-seq expr)
@@ -234,13 +227,13 @@
   (if (empty? s)
     (gen-eval-node ())
     (let [[f & args] (map (partial ->eval-node &a nil) s)
-          [a1 a2 a3 a4 a5 a6 a7] args]
+          [a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15] args] ;; TODO: unroll with template!
       (dorun args)
       (if-let [call-factory (clojure-core-inlined-fns (::var (meta f)))]
         (apply call-factory args)
         (template
         (case (count args)
-          ~@(for [i (range 8)]
+          ~@(for [i (range 16)]
               [i (list 'gen-eval-node (list* '.invoke (quote ^clojure.lang.IFn (evalme f &b))
                                               (for [j (range 1 (inc i))] (list 'evalme (symbol (str 'a j)) '&b))))])
           ;; else
