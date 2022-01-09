@@ -336,7 +336,6 @@
 (defmethod seq->eval-node 'fn* seq-eval-fn [iden->idx recur-indices form]
   (assert (meta form))
   (let [[fname & bodies]      (parsed-fn form)
-        iden->idx             (if fname (assoc iden->idx fname ::fn-name-binding) iden->idx)
         rest-def              (first (filter (fn [[args]] (some #{'&} args)) bodies))
         rest-def-butlast-args (drop-last 2 (first rest-def))
         rest-def-last-arg     (last (first rest-def))
@@ -347,24 +346,24 @@
                                              recur-indices
                                              (list* 'do rest-def-bodies)))
         bodies (remove #{rest-def} bodies)
-        arity->args      (reduce (fn [m [args]] (assoc m (count args) args))
-                                 {} bodies)
+        arity->args       (reduce (fn [m [args]] (assoc m (count args) args))
+                                  {} bodies)
+        symbol-used       (::symbol-used (meta form)) ;; vector of all lexical bindings enclosed in the fn
         arity->body-node  (into (if rest-def-bodies
                                   ;; TODO!
                                   {:variadic (->eval-node iden->idx recur-indices (list* 'do rest-def-bodies))}
                                   {})
                                 (for [[args & bodies :as def] bodies
-                                      :let [iden->idx (zipmap (concat (::symbol-used (meta def))
-                                                                      (when-let [i (::fn-sym-own (meta def))]
-                                                                        [i])
+                                      :let [self-sym  (::fn-sym-own (meta def))
+                                            iden->idx (zipmap (concat symbol-used
+                                                                      (when self-sym [self-sym])
                                                                       (::fn-sym-introduced (meta def)))
                                                               (range))
                                             recur-indices (mapv iden->idx (::symbol-loop (meta def)))]]
                                   [(count args) (->eval-node iden->idx recur-indices (list* 'do bodies))]))
         arity->def (reduce (fn [m [args & bodies :as def]]
                              (assoc m (count args) def)) {} bodies)]
-    (let [symbol-used         (::symbol-used (meta form))
-          enclosed-array-size (int (if fname (inc (count symbol-used)) (count symbol-used)))
+    (let [enclosed-array-size (int (if fname (inc (count symbol-used)) (count symbol-used)))
           [body0 body1 body2 body3] (map arity->body-node (range))
           [body0-symbols body1-symbols body2-symbols body3-symbols] (map (comp ::fn-sym-introduced meta arity->def) (range))]
       (assert (set? symbol-used))
@@ -378,7 +377,6 @@
          (->
           (fn
             ([]
-             (assert body0-symbols)
              (let [invocation-array (java.util.Arrays/copyOf
                                      enclosed-array (+ (count body0-symbols) enclosed-array-size))]
                (loop []
@@ -387,11 +385,6 @@
                      (recur)
                      result)))))
             ([x]
-            ;; there is no such arity defined!
-             (assert body1-symbols
-               (str "Should not hav been invoked!"
-                    (pr-str x) (pr-str form) \newline (pr-str (meta form)))
-             )
              (let [invocation-array (java.util.Arrays/copyOf
                                      enclosed-array (+ (count body1-symbols) enclosed-array-size))]
                ;; also: fill f with arguments
@@ -402,7 +395,6 @@
                      (recur)
                      result)))))
             ([x y]
-             (assert body2-symbols)
              (let [invocation-array (java.util.Arrays/copyOf
                                      enclosed-array (+ (count body2-symbols) enclosed-array-size))]
                ;; also: fill f with arguments
@@ -414,7 +406,7 @@
                      (recur)
                      result)))))
             ([x y z]
-             (assert body3-symbols)
+             (assert body3-symbols) ;; to check that arity exists!
              (let [invocation-array (java.util.Arrays/copyOf
                                      enclosed-array (+ (count body3-symbols) enclosed-array-size))]
                ;; also: fill f with arguments
@@ -717,7 +709,7 @@
                   (with-meta (list* args bodies)
                     {::symbol-used       (set (remove new-acc-1 (mapcat (comp ::symbol-used meta) bodies)))
                      ::fn-sym-own        (new-acc fname)
-                     ::fn-sym-introduced (-> symbol-loop
+                     ::fn-sym-introduced (-> symbol-loop ;; arguments + let vars
                                              ; (cond-> fname (conj (new-acc fname)))
                                              (into (set (mapcat (comp ::symbol-introduced meta) bodies))))
                      ::symbol-loop       symbol-loop

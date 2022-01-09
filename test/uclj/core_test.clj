@@ -178,11 +178,12 @@
 (deftest test-core-async
   (is (= 34 (evaluator '(clojure.core.async/<!! (clojure.core.async/go 34)))))
 
+
   (testing "Macro has access to content of &env"
-    (is (= 3 (clojure.core.async/<!! (evaluator '(let [a 42] (clojure.core.async/go a)))))))
+    (is (= 42 (clojure.core.async/<!! (evaluator '(let [a 42] (clojure.core.async/go a)))))))
 
   ;; has macro bindings
-  #_(is (= 3 (evaluator '(let [a (clojure.core.async/go 1)
+  (is (= 3 (evaluator '(let [a (clojure.core.async/go 1)
                              b (clojure.core.async/go 2)]
                          (clojure.core.async/<!!
                           (clojure.core.async/go
