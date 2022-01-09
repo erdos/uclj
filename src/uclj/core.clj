@@ -359,7 +359,7 @@
                                         (if (identical? ::recur result#)
                                           (recur)
                                           result#))))))
-                 #_  ([~@(for [i (range (inc max-arity))] (symbol (str 'arg- i))) ~'& arg-rest#]
+                   ([~@(for [i (range max-arity)] (symbol (str 'arg- i))) ~'& arg-rest#]
                        (assert body-vararg-symbols# "Called with too many parameters!")
                        (let [~'invocation-array (java.util.Arrays/copyOf ~'enclosed-array (+ (count body-vararg-symbols#) ~'enclosed-array-size))]
                           ~@(for [j (range (+ max-arity))]
@@ -373,10 +373,10 @@
             (cond->> ~fname (aset #^objects ~'enclosed-array (dec ~'enclosed-array-size))))))))
 
 
-(defn- make-fn-body [fname symbol-used arity->body-node arity->symbols-introduced iden->idx]
+(defn- make-fn-body [fname symbol-used arity->body-node arity->symbols-introduced iden->idx vararg-arity]
   (let [new-idx->old-idx          (mapv iden->idx symbol-used)]
     (template
-      (case (apply max (keys (dissoc arity->body-node :variadic)))
+      (case (int (apply max (or vararg-arity 0) (keys (dissoc arity->body-node :variadic))))
         ~@(mapcat seq (for [i (range 19)]
                          [i (list 'do (list 'make-fn-body-upto-arity i 'fname 'symbol-used 'new-idx->old-idx 'arity->body-node 'arity->symbols-introduced))]))))))
 
@@ -385,7 +385,8 @@
   (let [[fname & bodies]          (parsed-fn form)
         symbol-used               (::symbol-used (meta form)) ;; set of all lexical bindings enclosed in the fn
         arity->def                (reduce (fn [m [args & bodies :as def]] (assoc m (if (some #{'&} args) :variadic (count args)) def)) {} bodies)
-        arity->symbols-introduced (into {} (for [[k v] arity->def] [k (::fn-sym-introduced (meta v))]))        
+        arity->symbols-introduced (into {} (for [[k v] arity->def] [k (::fn-sym-introduced (meta v))]))
+        vararg-arity              (when-let [[args] (arity->def :variadic)] (- (count args) 2))
         arity->body-node          (into {}
                                         (for [[arity [args & bodies :as def]] arity->def
                                               :let [iden->idx (zipmap (concat symbol-used
@@ -394,7 +395,7 @@
                                                                       (range))
                                                     recur-indices (mapv iden->idx (::symbol-loop (meta def)))]]
                                           [arity (->eval-node iden->idx recur-indices (list* 'do bodies))]))]
-    (make-fn-body fname symbol-used arity->body-node arity->symbols-introduced iden->idx)))
+    (make-fn-body fname symbol-used arity->body-node arity->symbols-introduced iden->idx vararg-arity)))
 
 (defmethod seq->eval-node 'let* seq-eval-let [iden->idx recur-indices [_ bindings & bodies :as form]]
   (cond
