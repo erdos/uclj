@@ -103,6 +103,12 @@
                     (let [f (fn ([a] (+ a x)) ([a b] (+ a b y))  )]
                       (+ (f 1) (f 2 3)))))))))
 
+  (testing "Variadic functions"
+    (is (= 10 (evaluator '((fn [& xs] (reduce + xs)) 1 2 3 4))))
+    (is (= [1 2 3 4]
+           (evaluator '(let [f (fn ([] 1) ([x] x) ([a b] (+ a b)) ([a b & cd] (apply + a b cd)))]
+              [(f) (f 2) (f 1 2) (f 1 1 1 1)])))))
+
   (testing "Returns argument"
     (is (= 1 (evaluator '((fn [a] a) 1))))
     (is (= 1 (evaluator '((fn [a b] a) 1 2))))
