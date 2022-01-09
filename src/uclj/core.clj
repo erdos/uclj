@@ -336,7 +336,9 @@
 (defmacro ^:private make-fn-body-upto-arity [max-arity fname symbol-used new-idx->old-idx arity->body-node arity->symbols-introduced]
   (assert (integer? max-arity))
   (assert (symbol? symbol-used))
-  `(let [~'enclosed-array-size                                            (int (if ~fname (inc (count ~symbol-used)) (count ~symbol-used)))
+  `(let [~'enclosed-array-size                                                  (int (if ~fname (inc (count ~symbol-used)) (count ~symbol-used)))
+         body-vararg#                                                           (:variadic ~arity->body-node)
+         body-vararg-symbols#                                                   (:variadic ~arity->symbols-introduced)
          [~@(for [i (range (inc max-arity))] (symbol (str 'body i)))]           (map ~arity->body-node (range))
          [~@(for [i (range (inc max-arity))] (symbol (str 'body i '-symbols)))] (map ~arity->symbols-introduced (range))]
     (gen-eval-node
@@ -346,16 +348,27 @@
           (doto (fn ~@(for [i (range (inc max-arity))
                             :let [syms (repeatedly i gensym)]]
                         (list (vec syms)
+                              `(assert ~(symbol (str 'body i '-symbols)) "Called with too many parameters!")
                               `(let [~'invocation-array (java.util.Arrays/copyOf
                                                           ~'enclosed-array (+ (count ~(symbol (str 'body i '-symbols))) ~'enclosed-array-size))]
-                                  (assert ~(symbol (str 'body i '-symbols)) "Called with too many parameters!")
                                   ~@(for [j (range i)]
                                       (list 'aset 'invocation-array (list '+ j 'enclosed-array-size) (nth syms j)))
                                     (loop []
                                       (let [result# (evalme ~(symbol (str 'body i)) ~'invocation-array)]
                                         (if (identical? ::recur result#)
                                           (recur)
-                                          result#)))))))
+                                          result#))))))
+                   ([~@(for [i (range (inc max-arity))] (symbol (str 'arg- i))) ~'& arg-rest#]
+                       (assert body-vararg-symbols# "Called with too many parameters!")
+                       (let [~'invocation-array (java.util.Arrays/copyOf ~'enclosed-array (+ (count body-vararg-symbols#) ~'enclosed-array-size))]
+                          ~@(for [j (range (inc max-arity))]
+                              (list 'aset 'invocation-array (list '+ j 'enclosed-array-size) (symbol (str 'arg- j))))
+                            (aset ~'invocation-array (+ ~max-arity ~'enclosed-array-size) arg-rest#)
+                            (loop []
+                              (let [result# (evalme body-vararg# ~'invocation-array)]
+                                (if (identical? ::recur result#)
+                                  (recur)
+                                  result#))))))
             (cond->> ~fname (aset #^objects ~'enclosed-array (dec ~'enclosed-array-size))))))))
 
 
@@ -363,7 +376,7 @@
   (let [new-idx->old-idx          (mapv iden->idx symbol-used)]
     (template
       (case (count arity->body-node)
-        ~@(mapcat seq (for [i (range 20)]
+        ~@(mapcat seq (for [i (range 19)]
                          [i  (list 'make-fn-body-upto-arity (inc i) 'fname 'symbol-used 'new-idx->old-idx 'arity->body-node 'arity->symbols-introduced)]))))))
 
 (defmethod seq->eval-node 'fn* seq-eval-fn [iden->idx recur-indices form]
