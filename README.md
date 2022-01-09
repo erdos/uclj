@@ -41,7 +41,7 @@ You can see that for heavier tasks, running the `clojure` is the fastest. For li
 
 ## License
 
-Copyright © 2021 Janos Erdos
+Copyright © 2022 Janos Erdos
 
 This program and the accompanying materials are made available under the
 terms of the Eclipse Public License 2.0 which is available at
