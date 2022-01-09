@@ -375,14 +375,14 @@
 (defn- make-fn-body [fname symbol-used arity->body-node arity->symbols-introduced iden->idx]
   (let [new-idx->old-idx          (mapv iden->idx symbol-used)]
     (template
-      (case (count arity->body-node)
+      (case (count (dissoc arity->body-node :variadic))
         ~@(mapcat seq (for [i (range 19)]
-                         [i  (list 'make-fn-body-upto-arity (inc i) 'fname 'symbol-used 'new-idx->old-idx 'arity->body-node 'arity->symbols-introduced)]))))))
+                         [i (list 'do (list 'make-fn-body-upto-arity (inc i) 'fname 'symbol-used 'new-idx->old-idx 'arity->body-node 'arity->symbols-introduced))]))))))
 
 (defmethod seq->eval-node 'fn* seq-eval-fn [iden->idx recur-indices form]
   (assert (meta form))
-  (let [[fname & bodies]      (parsed-fn form)
-        rest-def              (first (filter (fn [[args]] (some #{'&} args)) bodies))
+  (let [[fname & bodies1]      (parsed-fn form)
+        rest-def              (first (filter (fn [[args]] (some #{'&} args)) bodies1))
         rest-def-butlast-args (drop-last 2 (first rest-def))
         rest-def-last-arg     (last (first rest-def))
         rest-def-bodies       (next rest-def)
@@ -391,11 +391,9 @@
                                                                [k ::fn-arg-binding]))
                                              recur-indices
                                              (list* 'do rest-def-bodies)))
-        bodies (remove #{rest-def} bodies)
-        arity->args       (reduce (fn [m [args]] (assoc m (count args) args))
-                                  {} bodies)
+        bodies (remove #{rest-def} bodies1)
         symbol-used       (::symbol-used (meta form)) ;; set of all lexical bindings enclosed in the fn
-        arity->body-node  (into (if rest-def-bodies
+        arity->body-node  (into (if rest-def
                                   ;; TODO!
                                   {:variadic (->eval-node iden->idx recur-indices (list* 'do rest-def-bodies))}
                                   {})
@@ -406,9 +404,8 @@
                                                               (range))
                                             recur-indices (mapv iden->idx (::symbol-loop (meta def)))]]
                                   [(count args) (->eval-node iden->idx recur-indices (list* 'do bodies))]))
-        arity->def (reduce (fn [m [args & bodies :as def]]
-                             (assoc m (count args) def)) {} bodies)
-        arity->symbols-introduced (into {} (for [i (range 20)] [i (::fn-sym-introduced (meta (arity->def i)))]))]
+        arity->def (reduce (fn [m [args & bodies :as def]] (assoc m (if (some #{'&} args) :variadic (count args)) def)) {} bodies1)
+        arity->symbols-introduced (into {} (for [[k v] arity->def] [k (::fn-sym-introduced (meta v))]))]
     (make-fn-body fname symbol-used arity->body-node arity->symbols-introduced iden->idx)))
 
 (defmethod seq->eval-node 'let* seq-eval-let [iden->idx recur-indices [_ bindings & bodies :as form]]
