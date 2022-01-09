@@ -27,15 +27,28 @@
 
 (run! require namespaces-to-require)
 
-(defmacro template [expr]
+(def ^:private ^:dynamic *template-vars* {})
+(defn- template* [bindings expr]
+  (assert (vector? bindings))
   (letfn [(unroll [expr] (cond (seq? expr) (unroll-seq expr)
-                               (vector? expr) [(vec (mapcat unroll expr))]
-                               :else [expr]))
+                              (vector? expr) [(vec (mapcat unroll expr))]
+                              :else [expr]))
+          (evaling [expr]
+            (eval `(let [~@(mapcat seq (for [[k] *template-vars*] [k `(*template-vars* '~k)]))] ~expr)))
           (unroll-seq [[t s :as expr]]
-            (cond ('#{clojure.core/unquote-splicing} t) (eval s)
-                  ('#{clojure.core/unquote} t)          [(eval s)]
-                  :else                                 [(mapcat unroll expr)]))]
-    (first (unroll expr))))
+            (cond ('#{clojure.core/unquote-splicing} t) (evaling s)
+                  ('#{clojure.core/unquote} t)          [(evaling s)]
+                  :else                                 [(doall (mapcat unroll expr))]))]
+    (binding [*template-vars* (eval `(let [~@bindings] ~(do (into {} (for [s (flatten (take-nth 2 bindings))] [(list 'quote s) s])))))]
+      (first (unroll expr)))))
+
+;; Works like an inlined defmacro call: The expression in (template) calls will be the result of the macro expansion.
+;; You can include unquoted (ie.:  ~() and ~@() ) forms in the expression so the evaluation result will be substituted
+;; in their place. Optionally, a binding vector can be given as a first argument, this will bind values to symbols that
+;; can be used when evaluating unquoted subexpressions.
+(defmacro template
+  ([vars expr] (template* vars expr))
+  ([expr] (template* [] expr)))
 
 ;; resolves to class or nil or throws exception
 (defn symbol->class [sym]
@@ -231,13 +244,13 @@
       (dorun args)
       (if-let [call-factory (clojure-core-inlined-fns (::var (meta f)))]
         (apply call-factory args)
-        (template
-        (case (count args)
-          ~@(for [i (range 16)]
-              [i (list 'gen-eval-node (list* '.invoke (quote ^clojure.lang.IFn (evalme f &b))
-                                              (for [j (range 1 (inc i))] (list 'evalme (symbol (str 'a j)) '&b))))])
-          ;; else
-          (gen-eval-node (apply (evalme f &b) (for [e args] (evalme e &b))))))))))
+        (template [a-symbol #(symbol (str 'a %))]
+          (case (count args)
+            ~@(for [i (range 16)]
+                [i (list 'gen-eval-node (list* '.invoke (quote ^clojure.lang.IFn (evalme f &b))
+                                                (for [j (range 1 (inc i))] (list 'evalme (a-symbol j) '&b))))])
+            ;; else
+            (gen-eval-node (apply (evalme f &b) (for [e args] (evalme e &b))))))))))
 
 (defmethod seq->eval-node 'quote seq-eval-quote [_ _ [_ quoted]] (gen-eval-node quoted))
 
@@ -291,7 +304,7 @@
   (let [bodies (concat (map (partial ->eval-node iden->idx nil) (butlast bodies))
                        (list (->eval-node iden->idx recur-indices (last bodies))))
         [b1 b2 b3 b4 b5 b6 b7 b8 b9] bodies]
-    (template
+    (template [b-symbol #(symbol (str 'b %))]
      (case (count bodies)
        0 nil
        1 (first bodies)
@@ -300,7 +313,7 @@
                  (for [i (range 2 10)]
                    [i (list 'gen-eval-node
                              (list* 'do (for [j (range 1 (inc i))]
-                                          (list 'evalme (symbol (str 'b j)) '&b))))]))
+                                          (list 'evalme (b-symbol j) '&b))))]))
 
        ;; else
        (let [butlast-body (doall (butlast bodies))
@@ -367,7 +380,7 @@
 
 
 (defn- make-fn-body [fname symbol-used arity->body-node arity->symbols-introduced iden->idx vararg-arity]
-  (let [new-idx->old-idx          (mapv iden->idx symbol-used)]
+  (let [new-idx->old-idx (not-empty (mapv iden->idx symbol-used))]
     (template
       (case (int (apply max (or vararg-arity 0) (keys (dissoc arity->body-node :variadic))))
         ~@(mapcat seq (for [i (range 19)]
@@ -399,8 +412,9 @@
                                            (nnext (first bodies))))
 
     :else
-    (template
-      (let [[~@(for [i (range 20)], [(symbol (str 'idx i)) (symbol (str 'node i))])]
+    (template [idx-symbols  (mapv #(symbol (str 'idx- %)) (range 20))
+               node-symbols (mapv #(symbol (str 'node- %)) (range 20))]
+      (let [[~@(map vector idx-symbols node-symbols)]
             (for [[k v] (partition 2 bindings)]
               [(int (iden->idx (::symbol-identity (meta k))))
               (->eval-node iden->idx nil v)])
@@ -411,7 +425,7 @@
                       [(* 2 i)
                         `(gen-eval-node
                           (do ~@(for [i (range i)]
-                                  `(aset ~'&b ~(symbol (str "idx" i)) (evalme ~(symbol (str "node" i)) ~'&b )))
+                                  `(aset ~'&b ~(idx-symbols i) (evalme ~(node-symbols i) ~'&b )))
                               (evalme ~'body-node ~'&b)))])))))))
 
 (defmethod seq->eval-node 'loop* seq-eval-loop [iden->idx _ [_ bindings & bodies :as def]]
@@ -422,14 +436,15 @@
         recur-indices                   (mapv iden->idx (::symbol-loop (meta def)))
         body-node                       (seq->eval-node iden->idx recur-indices (list* 'do bodies))
         [idx0 idx1 idx2 idx3 idx4 idx5] recur-indices]
-    (template
+    (template [idx-symbols  (mapv #(symbol (str 'idx %)) (range 20))
+               node-symbols (mapv #(symbol (str 'node %)) (range 20))]
       (case (count bindings)
         ~@(mapcat seq
                   (for [i (range 6)]
                     [(* 2 i)
                       `(gen-eval-node
                         (do ~@(for [i (range i)]
-                                `(aset ~'&b ~(symbol (str "idx" i)) (evalme ~(symbol (str "node" i)) ~'&b )))
+                                `(aset ~'&b ~(idx-symbols i) (evalme ~(node-symbols i) ~'&b )))
                             (loop []
                              (let [result# (evalme ~'body-node ~'&b)]
                               (if (identical? ::recur result#)
