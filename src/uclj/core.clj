@@ -381,30 +381,18 @@
 
 (defmethod seq->eval-node 'fn* seq-eval-fn [iden->idx recur-indices form]
   (assert (meta form))
-  (let [[fname & bodies1]      (parsed-fn form)
-        rest-def              (first (filter (fn [[args]] (some #{'&} args)) bodies1))
-        rest-def-butlast-args (drop-last 2 (first rest-def))
-        rest-def-last-arg     (last (first rest-def))
-        rest-def-bodies       (next rest-def)
-        rest-node             (when rest-def
-                                (->eval-node (into iden->idx (for [k (cons rest-def-last-arg rest-def-butlast-args)]
-                                                               [k ::fn-arg-binding]))
-                                             recur-indices
-                                             (list* 'do rest-def-bodies)))
-        bodies (remove #{rest-def} bodies1)
-        symbol-used       (::symbol-used (meta form)) ;; set of all lexical bindings enclosed in the fn
-        arity->def (reduce (fn [m [args & bodies :as def]] (assoc m (if (some #{'&} args) :variadic (count args)) def)) {} bodies1)
-        arity->symbols-introduced (into {} (for [[k v] arity->def] [k (::fn-sym-introduced (meta v))]))
-        
-        arity->body-node  (into {}
-                                (for [[arity [args & bodies :as def]] arity->def
-                                      :let [iden->idx (zipmap (concat symbol-used
-                                                                      (when-let [sym (::fn-sym-own (meta def))] [sym])
-                                                                      (::fn-sym-introduced (meta def)))
-                                                              (range))
-                                            recur-indices (mapv iden->idx (::symbol-loop (meta def)))]]
-                                  [arity (->eval-node iden->idx recur-indices (list* 'do bodies))]))        
-        ]
+  (let [[fname & bodies]          (parsed-fn form)
+        symbol-used               (::symbol-used (meta form)) ;; set of all lexical bindings enclosed in the fn
+        arity->def                (reduce (fn [m [args & bodies :as def]] (assoc m (if (some #{'&} args) :variadic (count args)) def)) {} bodies)
+        arity->symbols-introduced (into {} (for [[k v] arity->def] [k (::fn-sym-introduced (meta v))]))        
+        arity->body-node          (into {}
+                                        (for [[arity [args & bodies :as def]] arity->def
+                                              :let [iden->idx (zipmap (concat symbol-used
+                                                                              (when-let [sym (::fn-sym-own (meta def))] [sym])
+                                                                              (::fn-sym-introduced (meta def)))
+                                                                      (range))
+                                                    recur-indices (mapv iden->idx (::symbol-loop (meta def)))]]
+                                          [arity (->eval-node iden->idx recur-indices (list* 'do bodies))]))]
     (make-fn-body fname symbol-used arity->body-node arity->symbols-introduced iden->idx)))
 
 (defmethod seq->eval-node 'let* seq-eval-let [iden->idx recur-indices [_ bindings & bodies :as form]]
