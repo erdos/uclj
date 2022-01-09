@@ -348,15 +348,14 @@
         bodies (remove #{rest-def} bodies)
         arity->args       (reduce (fn [m [args]] (assoc m (count args) args))
                                   {} bodies)
-        symbol-used       (::symbol-used (meta form)) ;; vector of all lexical bindings enclosed in the fn
+        symbol-used       (::symbol-used (meta form)) ;; set of all lexical bindings enclosed in the fn
         arity->body-node  (into (if rest-def-bodies
                                   ;; TODO!
                                   {:variadic (->eval-node iden->idx recur-indices (list* 'do rest-def-bodies))}
                                   {})
                                 (for [[args & bodies :as def] bodies
-                                      :let [self-sym  (::fn-sym-own (meta def))
-                                            iden->idx (zipmap (concat symbol-used
-                                                                      (when self-sym [self-sym])
+                                      :let [iden->idx (zipmap (concat symbol-used
+                                                                      (when-let [sym (::fn-sym-own (meta def))] [sym])
                                                                       (::fn-sym-introduced (meta def)))
                                                               (range))
                                             recur-indices (mapv iden->idx (::symbol-loop (meta def)))]]
@@ -366,7 +365,6 @@
     (let [enclosed-array-size (int (if fname (inc (count symbol-used)) (count symbol-used)))
           [body0 body1 body2 body3] (map arity->body-node (range))
           [body0-symbols body1-symbols body2-symbols body3-symbols] (map (comp ::fn-sym-introduced meta arity->def) (range))]
-      (assert (set? symbol-used))
       (gen-eval-node
        ;; the enclosed-array contains enclosed context
        (let [enclosed-array (object-array enclosed-array-size)]
@@ -420,7 +418,6 @@
                      result)))))
             ;; TODO: generate for all arities
             )
-          ;; ha van fname, akkor az enclosed-array utolso eleme legyen
           (doto (cond->> fname (aset #^objects enclosed-array (dec enclosed-array-size))))))))))
 
 (defmethod seq->eval-node 'let* seq-eval-let [iden->idx recur-indices [_ bindings & bodies :as form]]
@@ -482,40 +479,26 @@
        (let [args (for [a args] (evalme a &b))]
          (clojure.lang.Reflector/invokeConstructor clz (into-array Object args)))))))
 
+(def ^:private node-symbols (for [i (range)] (symbol (str 'node- i))))
+(def ^:private index-symbols (for [i (range)] (symbol (str 'index i))))
+
 (defmethod seq->eval-node 'recur seq-eval-recur [iden->idx recur-indices [_ & values]]
   (assert recur-indices "Recur is not in tail position!")
   (assert (= (count recur-indices) (count values)) "Recur argument count mismatch!")
-  (let [nodes (map (partial ->eval-node iden->idx nil) values)
-        [n1 n2 n3 n4] nodes
-        [i1 i2 i3 i4] recur-indices] ;; TODO!!
-    (case (count nodes)
-      0 (gen-eval-node (let [] ::recur))
-      1 (gen-eval-node (let [v1 (evalme n1 &b)]
-                         (aset &b i1 v1)
-                         ::recur))
-      2 (gen-eval-node (let [v1 (evalme n1 &b)
-                             v2 (evalme n2 &b)]
-                         (aset &b i1 v1)
-                         (aset &b i2 v2)
-                         ::recur))
-      3 (gen-eval-node (let [v1 (evalme n1 &b)
-                             v2 (evalme n2 &b)
-                             v3 (evalme n3 &b)]
-                         (aset &b i1 v1)
-                         (aset &b i2 v2)
-                         (aset &b i3 v3)
-                         ::recur))
-      4 (gen-eval-node (let [v1 (evalme n1 &b)
-                             v2 (evalme n2 &b)
-                             v3 (evalme n3 &b)
-                             v4 (evalme n4 &b)]
-                         (aset &b i1 v1)
-                         (aset &b i2 v2)
-                         (aset &b i3 v3)
-                         (aset &b i4 v4)
-                         ::recur))
-    ;; TODO: more arities with template!
-    )))
+  (template
+    (let [nodes (map (partial ->eval-node iden->idx nil) values)]
+      (case (count nodes)
+        ~@(mapcat seq
+            (for [i (range 20)
+                  :let [node-symbols (take i node-symbols)
+                        index-symbols (take i index-symbols)]]
+              [i
+               `(let [[~@node-symbols]  ~'nodes
+                      [~@index-symbols] ~'recur-indices]
+                  (gen-eval-node
+                    (let [~@(interleave node-symbols (for [n node-symbols] (list 'evalme n '&b)))]
+                      ~@(map (partial list 'aset '&b) index-symbols node-symbols)
+                      ::recur)))]))))))
 
 (defmethod seq->eval-node 'throw [&a _ [_ e :as form]]
   (assert (= 2 (count form)))
