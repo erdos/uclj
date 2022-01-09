@@ -333,15 +333,17 @@
 
 (def ^:private kvs-seq (repeatedly #(vector (gensym "k") (gensym "v"))))
 
-(defn make-fn-body-upto-arity [max-arity fname symbol-used new-idx->old-idx arity->body-node arity->symbols-introduced]
-  (let [enclosed-array-size (int (if fname (inc (count symbol-used)) (count symbol-used)))
-        [body0 body1 body2 body3] (map arity->body-node (range))
-        [body0-symbols body1-symbols body2-symbols body3-symbols] (map arity->symbols-introduced (range))]
+(defmacro make-fn-body-upto-arity [max-arity fname symbol-used new-idx->old-idx arity->body-node arity->symbols-introduced]
+  (assert (integer? max-arity))
+  (assert (symbol? symbol-used))
+  `(let [~'enclosed-array-size                                            (int (if ~fname (inc (count ~symbol-used)) (count ~symbol-used)))
+         [~@(for [i (range max-arity)] (symbol (str 'body i)))]           (map ~arity->body-node (range))
+         [~@(for [i (range max-arity)] (symbol (str 'body i '-symbols)))] (map ~arity->symbols-introduced (range))]
     (gen-eval-node
         ;; the enclosed-array contains enclosed context
-        (let [enclosed-array (object-array enclosed-array-size)]
-          (reduce-kv (fn [_ new-idx old-idx] (aset enclosed-array new-idx (aget &b old-idx))) nil new-idx->old-idx)
-          (doto (template
+        (let [~'enclosed-array (object-array ~'enclosed-array-size)]
+          (reduce-kv (fn [_# new-idx# old-idx#] (aset ~'enclosed-array new-idx# (aget ~'&b old-idx#))) nil ~new-idx->old-idx)
+          (doto (do
                     (fn
                       ~@(for [i (range 4)
                               :let [syms (repeatedly i gensym)]]
@@ -355,7 +357,7 @@
                                         (if (identical? ::recur result#)
                                           (recur)
                                           result#))))))))
-            (cond->> fname (aset #^objects enclosed-array (dec enclosed-array-size))))))))
+            (cond->> ~fname (aset #^objects ~'enclosed-array (dec ~'enclosed-array-size))))))))
 
 
 (defn- make-fn-body [fname symbol-used arity->body-node arity->def iden->idx]
