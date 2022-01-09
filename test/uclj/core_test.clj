@@ -8,6 +8,8 @@
   (is (= 1 (evaluator '(let [a 1 b a] b))))
   (is (= 4 (evaluator '(let [a 2 b 3] (let [a 1] (+ a b))))))
 
+  (is (= "ax" (evaluator '(((let [a "a"] (fn fff ([] fff) ([x] (str a x))))) "x"))))
+
   (testing "Binding works across collections"
     (is (= 4 (evaluator '(first (let [a 4] #{a})))))
     (is (= 4 (evaluator '(ffirst (let [a 4] {a :v})))))
@@ -20,6 +22,10 @@
     (is (= 4 (evaluator '(let [inc dec] (inc 5)))))))
 
 (deftest test-eval-try
+  (testing "try-catch maintains sybol usage across closure"
+      (is (= 2 (evaluator '(let [a 1 b 2 c 3]
+                              ((fn [] (try (inc a) (catch RuntimeException e (inc b)) (finally (inc c))))))))))
+
   (is (= 2 (evaluator '(try 1 2 (finally 3)))))
   (is (= [0 0 2] (evaluator '(let [a (atom 0)] [@a (try @a (finally (reset! a 2))) @a]))))
   (is (= 1 (evaluator '(try 1 (catch Throwable t t)))))
@@ -51,9 +57,13 @@
 (defn unbound-value? [v] (instance? clojure.lang.Var$Unbound v))
 
 (deftest test-call-binary
-  #_(is (= () (evaluator '())))
+  (is (= () (evaluator '())))
   (is (= 23 (evaluator '(+ 20 3))))
-  )
+
+  (testing "used vars in case are correctly encapsulated in closure"
+    (is (= 7 (evaluator '(let [a 2] ((fn [t] (inc (+ t a))) 4))))))
+
+  :ok)
 
 (deftest test-def
   (testing "Def form declares var"
@@ -93,6 +103,12 @@
                     (let [f (fn ([a] (+ a x)) ([a b] (+ a b y))  )]
                       (+ (f 1) (f 2 3)))))))))
 
+  (testing "Variadic functions"
+    (is (= 10 (evaluator '((fn [& xs] (reduce + xs)) 1 2 3 4))))
+    (is (= [1 2 3 4]
+           (evaluator '(let [f (fn ([] 1) ([x] x) ([a b] (+ a b)) ([a b & cd] (apply + a b cd)))]
+              [(f) (f 2) (f 1 2) (f 1 1 1 1)])))))
+
   (testing "Returns argument"
     (is (= 1 (evaluator '((fn [a] a) 1))))
     (is (= 1 (evaluator '((fn [a b] a) 1 2))))
@@ -124,9 +140,13 @@
       (is (= :one (evaluator '(loop [i 12] (case i 0 :one (recur (dec i))))))))
     (testing "recur from branch"
       (is (= :two (evaluator '(loop [i 4] (case i (1 2 3 4) (recur (dec i)) :two))))))
-    #_(testing "Cannot recur from expression"
-      (is (thrown? AssertionError ;; TODO: throw other exception type!
+    (testing "Cannot recur from expression"
+      (is (thrown? UnsupportedOperationException ;; TODO: throw other exception type!
                    (evaluator '(loop [i 2] (case (recur (dec i)) 1 1 2 2 :three)))))))
+
+  (testing "used vars in case are correctly encapsulated in closure"
+    (is (= :ok 
+          (evaluator '(let [a :ok b :w1 c :w2] ((fn [t] (case t, 1 a, 2 b, c)) 1))))))
 
   (testing "Identity checking because all cases are keywords"
     (testing "All keys have different hashes"
@@ -164,11 +184,12 @@
 (deftest test-core-async
   (is (= 34 (evaluator '(clojure.core.async/<!! (clojure.core.async/go 34)))))
 
+
   (testing "Macro has access to content of &env"
-    (is (some? (evaluator '(let [a 42] (clojure.core.async/go a))))))
+    (is (= 42 (clojure.core.async/<!! (evaluator '(let [a 42] (clojure.core.async/go a)))))))
 
   ;; has macro bindings
-  #_(is (= 3 (evaluator '(let [a (clojure.core.async/go 1)
+  (is (= 3 (evaluator '(let [a (clojure.core.async/go 1)
                              b (clojure.core.async/go 2)]
                          (clojure.core.async/<!!
                           (clojure.core.async/go
