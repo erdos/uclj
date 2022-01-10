@@ -542,18 +542,24 @@
              (clojure.lang.Reflector/invokeInstanceMethod
               (evalme target &b) (name field) (into-array Object (for [a args] (evalme a &b)))))))))))
 
+;; We need a way to hard reset a value bound to a Var object.
+;; For some reason, Var.doSet works in the Clojure REPL but breaks when compiled with GraalVM.
+;; And Var.doReset works only in GraalVM. So we choose to use one over another depending on environemnt.
+(defn- var-set-reset! [^clojure.lang.Var v new-val]
+  (try
+    ;; works in Clojure REPL but breaks with GraalVM:
+    (.doSet v new-val)
+    (catch IllegalStateException _
+      ;; runs in GraalVM but does nothing in REPL:
+      (.doReset v new-val))))
+
 (doseq [lf '[in-ns clojure.core/in-ns]]
   (defmethod seq->eval-node lf [&a _ [_ nssym]]
     (let [sym-node (->eval-node &a nil nssym)]
       (gen-eval-node
        (let [new-ns (create-ns (evalme sym-node &b))]
          (alter-meta! (var *ns*) assoc :dynamic true)
-         (try
-           ;; works in Clojure REPL but does not compile with graal!
-           (.doSet (var *ns*) new-ns)
-           (catch IllegalStateException _
-             ;; compiles but does nothing in REPL
-             (.doReset (var *ns*) new-ns))))))))
+         (var-set-reset! (var *ns*) new-ns))))))
 
 (declare evaluator)
 (doseq [lf '[clojure.core/load-file load-file]]
@@ -565,11 +571,10 @@
                  :while (not= ::eof read)]
            (evaluator read)))))))
 
+;; Needed by (ns) forms.
 (defmethod seq->eval-node 'clojure.core/with-loading-context [&a _ [_ & bodies]]
-  ;; needed by (ns) forms
   (seq->eval-node &a nil (list* 'do bodies)))
 
-;; TODO!
 (defmethod seq->eval-node 'try [iden->idx recur-indices [_ & xs]]
   (let [catch-clauses  (keep (fn [x] (when (and (seq? x) (= 'catch (first x)))
                                        [(resolve (nth x 1)) ;; type
@@ -791,12 +796,19 @@
 
     :else ;; interactive mode
     (do (println "Welcome to the small interpreter!")
+        (doseq [v [#'*1 #'*2 #'*3 #'*e]] (var-set-reset! v nil))
         (loop []
           (print (str (ns-name *ns*) "=> ")) (flush)
           (let [read (read {:eof ::eof} *in*)]
             (when-not (= ::eof read)
-              (try (println (evaluator read))
-                   (catch Throwable t (.printStackTrace t)))
+              (try (let [e (evaluator read)]
+                     (var-set-reset! #'*3 *2)
+                     (var-set-reset! #'*2 *1)
+                     (var-set-reset! #'*1 e)
+                     (println e))
+                   (catch Throwable t 
+                     (.printStackTrace t)
+                     (var-set-reset! #'*e t)))
               (recur))))
         (println "EOF, bye!"))))
 
