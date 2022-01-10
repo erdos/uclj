@@ -20,7 +20,7 @@
                                         ;[clojure.pprint :as pprint]
     clojure.string
     clojure.set
-                                        ;[clojure.test :refer [deftest testing is are]]
+    [clojure.test :refer [deftest testing is are]]
                                         ;clojure.walk
                                         ;[clojure.zip :as zip]
     ])
@@ -771,13 +771,21 @@
     ;; array is empty yet.
     (evalme node nil)))
 
+(defn- all-test-namespaces []
+  (for [ns (all-ns)
+        :when (or (ns-resolve ns 'test-ns-hook)
+                  (some (comp :test  meta) (vals (ns-interns ns))))]
+    ns))
+
 (defn -main [& args]
   (cond
     (and (first args) (.startsWith (str (first args)) "("))
     (println (evaluator (read-string (first args))))
 
     (and (first args) (.exists (io/file (first args))))
-    (evaluator `(load-file ~(first args)))
+    (do (evaluator `(load-file ~(first args)))
+        (when (=  "--test" (second args))
+          (apply clojure.test/run-tests (all-test-namespaces))))
 
     :else ;; interactive mode
     (do (println "Welcome to the small interpreter!")

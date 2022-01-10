@@ -15,6 +15,7 @@ It is built on top of the Clojure JVM runtime, but the parts that need dynamic c
 Download (or compile) the standalone `uclj` binary and just run it:
 - call `uclj` without parameters to get a REPL
 - call `uclj filename.clj` to load a file
+- call `uclj filename.clj --test` to load a file and then run all test cases in it
 - call `uclj '(...)'` to evaluate a Clojure expression. (It must start with a `(` character.)
 
 ### Build
