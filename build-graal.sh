@@ -2,11 +2,20 @@
 
 set -euxo pipefail
 
+if [ -n "${GRAALVM_HOME-}" ]
+then
+    NATIVE_IMAGE="$GRAALVM_HOME/bin/native-image"
+else
+    NATIVE_IMAGE=native-image
+fi
+
+command -v $NATIVE_IMAGE
+
 lein uberjar
 
 JARFILE=`ls target/uclj-*-standalone.jar`
 
-$GRAALVM_HOME/bin/native-image \
+$NATIVE_IMAGE \
     --no-fallback \
     -H:ReflectionConfigurationFiles=reflectconfig \
     --initialize-at-build-time \
