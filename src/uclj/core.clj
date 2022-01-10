@@ -139,6 +139,10 @@
            (let [&env (reduce add-env &env (take-nth 2 (second expanded)))]
              (map (partial iter &env) expanded))
 
+           def
+           (list* 'def (with-meta (second expanded) (iter &env (meta (second expanded))))
+                       (map (partial iter &env) (nnext expanded)))
+
            (loop* let*)
            (let [_ (assert (vector? (second expanded)))
                  [bindings-vec &env]
@@ -156,10 +160,10 @@
            (let [[fname & bodies] (parsed-fn expanded)
                  &env             (if fname (add-env &env fname) &env)]
              (concat '[fn*]
-                      (when fname [fname])
-                      (for [[args & bodies] bodies
-                            :let [&env (reduce add-env &env args)]]
-                        (list* args (map (partial iter &env) bodies)))))
+                     (when fname [fname])
+                     (for [[args & bodies] bodies
+                           :let [&env (reduce add-env &env args)]]
+                       (list* args (map (partial iter &env) bodies)))))
 
            ;; else
            (map (partial iter &env) expanded))
@@ -173,9 +177,6 @@
          :else ;; scalars
          expanded)))
    {} exp))
-
-
-(defrecord Recur [bindings])
 
 (defprotocol EvalNode
   (evalme [this #^objects bindings]))
@@ -267,12 +268,23 @@
                                 def-bodies
                                 [nil (first def-bodies)])
         var-object ^clojure.lang.Var (intern *ns* def-name)
-        value-node (->eval-node &a nil def-value)]
-    (when (:dynamic (meta def-name))
-      (.setDynamic var-object))
-    (if (not-empty def-bodies)
-      (gen-eval-node (doto var-object (.bindRoot (evalme value-node &b))))
-      (gen-eval-node var-object))))
+        value-node (->eval-node &a nil def-value)
+        var-meta   (if docstring (assoc (meta def-name) :doc docstring) (meta def-name))
+        meta-nodes (into {} (for [[k v] var-meta]
+                              (if (#{:arglists :doc} k)
+                                [k v]
+                                [(->eval-node &a nil k) (->eval-node &a nil v)])))]
+    (gen-eval-node
+     (let [m (reduce-kv (fn [m k v]
+                          (if (#{:arglists :doc} k)
+                            (assoc m k v)
+                            (assoc m (evalme k &b) (evalme v &b)))) {} meta-nodes)]
+       (.setMeta var-object m)
+       (when (:dynamic m)
+         (.setDynamic var-object))
+       (when (not-empty def-bodies)
+         (.bindRoot var-object (evalme value-node &b)))
+       var-object))))
 
 (defmethod seq->eval-node 'case* seq-eval-case
   [&a recur-indices [_ value shift mask default-value imap switch-type mode skip-check :as form]]
@@ -661,6 +673,14 @@
         {::symbol-used       symbol-used
          ::symbol-introduced symbol-introduced
          ::symbol-loop       (when (= form 'loop*) (mapv sym->iden (take-nth 2 bindings)))}))))
+
+(defmethod enhance-code 'def [sym->iden [_ var-sym & tail]]
+  (let [var-sym (vary-meta var-sym (partial reduce-kv (fn [m k v] (assoc m (enhance-code sym->iden k) (enhance-code sym->iden v))) {}))
+        tail    (map (partial enhance-code sym->iden) tail)
+        all-metas (cons (meta (last tail)) (map meta (mapcat seq (meta var-sym))))]
+    (with-meta (list* 'def var-sym tail)
+      {::symbol-used       (set (mapcat ::symbol-used       all-metas))
+       ::symbol-introduced (set (mapcat ::symbol-introduced all-metas))})))
 
 (defmethod enhance-code 'fn* [sym->iden fn-expression]
   (let [[fname & fbodies] (parsed-fn fn-expression)
