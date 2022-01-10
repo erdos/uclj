@@ -26,5 +26,5 @@ jobs:
           java-version: 11
           graalvm-version: 21.1.0
           native-image: true
-      - run: ./build-graal.sh
+      - run: bash ./build-graal.sh
       - run: ./uclj test/clojure_core_test.clj
