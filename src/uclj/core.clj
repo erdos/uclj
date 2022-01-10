@@ -778,6 +778,7 @@
     ns))
 
 (defn -main [& args]
+  (in-ns 'user)
   (cond
     (and (first args) (.startsWith (str (first args)) "("))
     (println (evaluator (read-string (first args))))
@@ -790,7 +791,7 @@
     :else ;; interactive mode
     (do (println "Welcome to the small interpreter!")
         (loop []
-          (print "$ ") (flush)
+          (print (str (ns-name *ns*) "=> ")) (flush)
           (let [read (read {:eof ::eof} *in*)]
             (when-not (= ::eof read)
               (try (println (evaluator read))
