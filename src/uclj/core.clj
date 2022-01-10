@@ -778,8 +778,8 @@
     ns))
 
 (defn -main [& args]
-  (in-ns 'user)
-  (run! require namespaces-to-require)
+  (evaluator '(in-ns 'user))
+  (evaluator '(run! require uclj.core/namespaces-to-require))
   (cond
     (and (first args) (.startsWith (str (first args)) "("))
     (println (evaluator (read-string (first args))))
