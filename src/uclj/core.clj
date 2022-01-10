@@ -17,7 +17,7 @@
                                         ;clojure.data.xml
                                         ;clojure.edn
     [clojure.java.io :as io]
-                                        ;[clojure.pprint :as pprint]
+    [clojure.pprint :as pprint :refer [pprint pp]]
     clojure.string
     clojure.set
     [clojure.test :refer [deftest testing is are]]
@@ -779,6 +779,7 @@
 
 (defn -main [& args]
   (in-ns 'user)
+  (run! require namespaces-to-require)
   (cond
     (and (first args) (.startsWith (str (first args)) "("))
     (println (evaluator (read-string (first args))))
