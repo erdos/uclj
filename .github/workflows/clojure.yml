@@ -16,7 +16,7 @@ jobs:
     - name: Run tests
       run: lein test
     - name: Run standard clojure tests
-      run: lein run test/clojure_core_test.clj
+      run: lein run test/clojure_core_test.clj --test
   native:
     runs-on: ubuntu-latest
     steps:
@@ -27,4 +27,4 @@ jobs:
           graalvm-version: 21.3.0
           native-image: true
       - run: bash ./build-graal.sh
-      - run: ./uclj test/clojure_core_test.clj
+      - run: ./uclj test/clojure_core_test.clj --test
