@@ -2,18 +2,14 @@
 
 set -euxo pipefail
 
-if [ -z "$GRAALVM_HOME" ]
+if [ -n "${GRAALVM_HOME-}" ]
 then
     NATIVE_IMAGE="$GRAALVM_HOME/bin/native-image"
 else
     NATIVE_IMAGE=native-image
 fi
 
-if ! command -v $NATIVE_IMAGE &> /dev/null
-then
-    echo "native-imagee could not be found"
-    exit 1
-fi
+command -v $NATIVE_IMAGE
 
 lein uberjar
 
