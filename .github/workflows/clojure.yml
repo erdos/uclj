@@ -17,7 +17,7 @@ jobs:
         key: ${{ runner.os }}-maven-${{ hashFiles('**/project.clj') }}
         restore-keys: |
           ${{ runner.os }}-maven-
-    - run: lein deps
+    - run: lein compile
     - name: Run unit tests
       run: lein test
     - name: Run standard clojure tests
@@ -37,6 +37,6 @@ jobs:
           key: ${{ runner.os }}-maven-${{ hashFiles('**/project.clj') }}
           restore-keys: |
             ${{ runner.os }}-maven-
-      - run: lein deps
+      - run: lein compile
       - run: bash ./build-graal.sh
       - run: ./uclj test/clojure_core_test.clj --test
