@@ -2,10 +2,6 @@
 
 set -euxo pipefail
 
-lein uberjar
-
-JARFILE=`ls target/uclj-*-standalone.jar`
-
 if [ -z "$GRAALVM_HOME" ]
 then
     NATIVE_IMAGE="$GRAALVM_HOME/bin/native-image"
@@ -18,6 +14,10 @@ then
     echo "native-imagee could not be found"
     exit 1
 fi
+
+lein uberjar
+
+JARFILE=`ls target/uclj-*-standalone.jar`
 
 $NATIVE_IMAGE \
     --no-fallback \
