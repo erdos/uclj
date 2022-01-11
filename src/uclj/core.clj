@@ -52,6 +52,10 @@
   ([vars expr] (template* vars expr))
   ([expr] (template* [] expr)))
 
+;; Maps f over all elements of coll. Does not change type of collection.
+(defn- map-coll [f coll]
+  (into (empty coll) (map (if (map? coll) (fn [[a b]] [(f a) (f b)]) f)) coll))
+
 ;; resolves to class or nil or throws exception
 (defn symbol->class [sym]
   (assert (symbol? sym))
@@ -170,11 +174,8 @@
            ;; else
            (map (partial iter &env) expanded))
 
-         (or (vector? expanded) (set? expanded))
-         (into (empty expanded) (map (partial iter &env)) expanded)
-
-         (map? expanded)
-         (into (empty expanded) (map (fn [[k v]] [(iter &env k) (iter &env v)])) expanded)
+         (or (vector? expanded) (set? expanded) (map? expanded))
+         (map-coll #(iter &env %) expanded)
 
          :else ;; scalars
          expanded)))
@@ -267,15 +268,9 @@
         var-object ^clojure.lang.Var (intern *ns* def-name)
         value-node (->eval-node &a nil def-value)
         var-meta   (if docstring (assoc (meta def-name) :doc docstring) (meta def-name))
-        meta-nodes (into {} (for [[k v] var-meta]
-                              (if (#{:arglists :doc} k)
-                                [k v]
-                                [(->eval-node &a nil k) (->eval-node &a nil v)])))]
+        meta-nodes (map-coll #(->eval-node &a nil %) var-meta)]
     (gen-eval-node
-     (let [m (reduce-kv (fn [m k v]
-                          (if (#{:arglists :doc} k)
-                            (assoc m k v)
-                            (assoc m (evalme k &b) (evalme v &b)))) {} meta-nodes)]
+     (let [m (map-coll #(evalme % &b) meta-nodes)]
        (.setMeta var-object m)
        (when (:dynamic m)
          (.setDynamic var-object))
