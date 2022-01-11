@@ -15,6 +15,7 @@
                                         ;clojure.datafy
                                         ;clojure.data.csv
     [clojure.data.priority-map :refer [priority-map]]
+    [clojure.data.json :as json]
     [clojure.data.xml :as xml]
     [clojure.edn :as edn]
     [clojure.java.io :as io]
