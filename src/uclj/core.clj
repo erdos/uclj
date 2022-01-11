@@ -646,10 +646,11 @@
     (with-meta s {::symbol-identity iden, ::symbol-used #{iden}})
     s))
 
+;; set and vector: recursively run for all elements and merge meta keys
 (doseq [t [clojure.lang.IPersistentVector clojure.lang.IPersistentSet]]
   (defmethod enhance-code t [sym->iden coll]
     (let [elems (for [c coll] (enhance-code sym->iden c))]
-      (with-meta             (into (empty coll) elems)
+      (with-meta (into (empty coll) elems)
         {::symbol-used       (set (mapcat (comp ::symbol-used meta) elems))
          ::symbol-introduced (set (mapcat (comp ::symbol-introduced meta) elems))}))))
 
@@ -763,14 +764,6 @@
       (list* letfn* (vec (apply concat binding-pairs)) bodies)
       {::symbol-used symbol-used
        ::symbol-introduced symbol-introduced})))
-
-;; set and vector: recursively run for all elements and merge meta keys
-(doseq [t [clojure.lang.IPersistentVector clojure.lang.IPersistentSet]]
-  (defmethod enhance-code t [sym->iden v]
-    (let [elems (for [b v] (enhance-code sym->iden b))]
-      (with-meta (into (empty v) elems)
-        {::symbol-used       (set (mapcat (comp ::symbol-used meta) elems))
-         ::symbol-introduced (set (mapcat (comp ::symbol-introduced meta) elems))}))))
 
 (defn evaluator [expr]
   (let [expr     `((fn* [] ~expr))
