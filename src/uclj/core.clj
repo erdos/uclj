@@ -13,20 +13,19 @@
                                         ;[clojure.core.logic :as logic]
                                         ;clojure.data
                                         ;clojure.datafy
-                                        ;clojure.data.csv
-    [clojure.data.priority-map :refer [priority-map]]
+    [clojure.data.csv :as csv]
     [clojure.data.json :as json]
+    [clojure.data.priority-map :refer [priority-map]]
     [clojure.data.xml :as xml]
     [clojure.edn :as edn]
     [clojure.java.io :as io]
     [clojure.math.combinatorics :as combo]
     [clojure.pprint :as pprint :refer [pprint pp]]
     [clojure.set :as set]
-    clojure.string
+    [clojure.string :as s]
     [clojure.test :refer [deftest testing is are]]
-                                        ;clojure.walk
-                                        ;[clojure.zip :as zip]
-    ])
+    [clojure.walk :as walk]
+    [clojure.zip :as zip]])
 
 (run! require namespaces-to-require)
 
@@ -121,8 +120,6 @@
 (defn- macroexpand-code [&env exp]
   (let [e (macroexpand-1-code &env exp)] (if (identical? e exp) exp (recur &env e))))
 
-; (macroexpand-code {} '(fn [a [b c] d] (+ b c)))
-
 ;; return seq of (fn-name ([args*] bodies*)+)
 (defn- parsed-fn [[_ & bodies]]
   (let [fname (when (symbol? (first bodies)) (first bodies))
@@ -130,10 +127,6 @@
         bodies (if (vector? (first bodies)) (list bodies) bodies)]
     (cons fname bodies)))
 
-;; (parsed-fn '(fn x [a [b _] c] 3))
-;; (parsed-fn '(fn ([a b[ f g] c] 3)))
-
-;;  TODO
 (defn macroexpand-all-code [exp]
   ((fn iter [&env exp]
      (let [expanded (macroexpand-code &env exp)]
@@ -304,7 +297,6 @@
            (evalme branch &b))
          (evalme default-value &b))))))
 
-;; iden->idx
 (defmethod seq->eval-node 'do seq-eval-do [iden->idx recur-indices [_ & bodies]]
   (let [bodies (concat (map (partial ->eval-node iden->idx nil) (butlast bodies))
                        (list (->eval-node iden->idx recur-indices (last bodies))))
@@ -313,13 +305,11 @@
      (case (count bodies)
        0 nil
        1 (first bodies)
-
        ~@(mapcat seq
                  (for [i (range 2 10)]
                    [i (list 'gen-eval-node
                              (list* 'do (for [j (range 1 (inc i))]
                                           (list 'evalme (b-symbol j) '&b))))]))
-
        ;; else
        (let [butlast-body (doall (butlast bodies))
              last-body    (last bodies)]
@@ -501,15 +491,12 @@
   (let [e (->eval-node &a nil e)]
     (gen-eval-node (-> e (evalme &b) (evalme nil)))))
 
-;; TODO: is it correct?
 (defmethod seq->eval-node 'var [&a _ [_ v]]
-  (let [x (resolve v)] ;; TODO!
+  (let [x (resolve v)]
     (assert x (str "Unable to resolve var: " (pr-str v) " in this context in ns " *ns*))
     (gen-eval-node x)))
 
 (defmethod seq->eval-node '. [&a _ [_ target field & args]]
-
-  ;; TODO: how is it possible that symbol is already resolved to Class here?
   (let [[field args] (if (seq? field) [(first field) (next field)] [field args])]
     (let [[arg1 arg2 arg3 :as args] (map (partial ->eval-node &a nil) args)]
       (if-let [target-class (cond (class? target) target
