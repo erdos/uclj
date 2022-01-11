@@ -14,14 +14,14 @@
                                         ;clojure.data
                                         ;clojure.datafy
                                         ;clojure.data.csv
-                                        ;clojure.data.xml
-                                        ;clojure.edn
     [clojure.data.priority-map :refer [priority-map]]
+    [clojure.data.xml :as xml]
+    [clojure.edn :as edn]
     [clojure.java.io :as io]
     [clojure.math.combinatorics :as combo]
     [clojure.pprint :as pprint :refer [pprint pp]]
-    clojure.string
     [clojure.set :as set]
+    clojure.string
     [clojure.test :refer [deftest testing is are]]
                                         ;clojure.walk
                                         ;[clojure.zip :as zip]
