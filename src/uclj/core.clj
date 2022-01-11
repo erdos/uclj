@@ -169,10 +169,10 @@
            (map (partial iter &env) expanded))
 
          (or (vector? expanded) (set? expanded))
-         (into (empty expanded) (map (partial iter &env) expanded))
+         (into (empty expanded) (map (partial iter &env)) expanded)
 
          (map? expanded)
-         (into (empty expanded) (for [[k v] expanded] [(iter &env k) (iter &env v)]))
+         (into (empty expanded) (map (fn [[k v]] [(iter &env k) (iter &env v)])) expanded)
 
          :else ;; scalars
          expanded)))
@@ -646,27 +646,20 @@
     (with-meta s {::symbol-identity iden, ::symbol-used #{iden}})
     s))
 
-;; set and vector: recursively run for all elements and merge meta keys
-(doseq [t [clojure.lang.IPersistentVector clojure.lang.IPersistentSet]]
+;; For vector, set, map: recursively run function on all elems and also on meta map.
+(doseq [[t                               coll->elems          elems->coll]
+        [[clojure.lang.IPersistentVector seq                  vec        ]
+         [clojure.lang.IPersistentSet    seq                  set        ]
+         [clojure.lang.IPersistentMap    (partial mapcat seq) (partial apply hash-map)]]]
   (defmethod enhance-code t [sym->iden coll]
     (let [enhanced-meta (enhance-code sym->iden (meta coll))
-          elems         (for [c coll] (enhance-code sym->iden c))]
-      (with-meta (into (empty coll) elems)
+          elems         (for [c (coll->elems coll)] (enhance-code sym->iden c))]
+      (with-meta (elems->coll elems)
         {::meta-exp          enhanced-meta
          ::symbol-used       (set/union (set (mapcat (comp ::symbol-used meta) elems))
                                         (::symbol-used (meta enhanced-meta)))
          ::symbol-introduced (set/union (set (mapcat (comp ::symbol-introduced meta) elems))
                                         (::symbol-introduced (meta enhanced-meta)))}))))
-
-(defmethod enhance-code clojure.lang.IPersistentMap [sym->iden coll]
-  (let [enhanced-meta (enhance-code sym->iden (meta coll))
-        elems         (for [kv coll, c kv] (enhance-code sym->iden c))]
-    (with-meta (apply hash-map elems)
-        {::meta-exp          enhanced-meta
-         ::symbol-used       (set/union (set (mapcat (comp ::symbol-used meta) elems))
-                                        (::symbol-used (meta enhanced-meta)))
-         ::symbol-introduced (set/union (set (mapcat (comp ::symbol-introduced meta) elems))
-                                        (::symbol-introduced (meta enhanced-meta)))})))
 
 (doseq [t '[let* loop*]]
   (defmethod enhance-code t [sym->iden [form bindings & bodies]]
