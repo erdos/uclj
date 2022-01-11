@@ -8,7 +8,7 @@ It is built on top of the Clojure JVM runtime, but the parts that need dynamic c
 
 - Starts quickly (it is compiled with GraalVM native-image)
 - Small (≪1K SLOC)
-- Out of the Box [core.async](https://github.com/clojure/core.async) support
+- Out of the Box [core.async](https://github.com/clojure/core.async) support and also [some other core libraries](https://github.com/erdos/uclj/blob/master/src/uclj/core.clj#L10)
 
 ## Usage
 
@@ -38,7 +38,7 @@ The author's [Advent Of Code 2021 Clojure solutions](https://github.com/erdos/ad
 | day9.clj  |          645+3          |     661+118      |       1607+37
 | day24.clj |          4639+175       |     7494+98      |       1409+13
 
-You can see that for heavier tasks, running the `clojure` is the fastest. For lighter tasks with high number of function invocations and loops, `uclj` can be the fastest.
+For light tasks with high number of function invocations and loops, `uclj` can be the fastest. For heavier tasks, running the `clojure` command is still winning.
 
 ## License
 
