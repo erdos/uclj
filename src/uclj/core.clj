@@ -16,6 +16,7 @@
                                         ;clojure.data.csv
                                         ;clojure.data.xml
                                         ;clojure.edn
+    [clojure.data.priority-map :refer [priority-map]]
     [clojure.java.io :as io]
     [clojure.math.combinatorics :as combo]
     [clojure.pprint :as pprint :refer [pprint pp]]
