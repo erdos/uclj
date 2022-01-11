@@ -609,14 +609,18 @@
           (throw (ex-info (str "Cannot access symbol! " expr) {:symbol expr})))
         (throw (ex-info (str "Cannot resolve symbol! " expr) {:symbol expr}))))))
 
+(defn- coll->eval-node [fmap sym->iden expr]
+  (into (empty expr) (fmap (partial ->eval-node sym->iden nil)) expr))
+
 (defn ->eval-node [sym->iden recur-indices expr]
   (when recur-indices
-    (every? integer? recur-indices))
-  (cond (seq? expr)  (seq->eval-node sym->iden recur-indices expr)
-        (map? expr)  (persistent! (reduce-kv (fn [a k v] (assoc! a (->eval-node sym->iden nil k) (->eval-node sym->iden nil v))) (transient (empty expr))  expr))
-        (coll? expr) (into (empty expr) (map (partial ->eval-node sym->iden nil) expr))
+    (assert (every? integer? recur-indices)))
+  (cond (seq? expr)    (seq->eval-node sym->iden recur-indices expr)
+        (map? expr)    (coll->eval-node #(map (fn [[a b]] [(% a) (% b)])) sym->iden expr)
+        (set? expr)    (coll->eval-node map sym->iden expr)
+        (vector? expr) (coll->eval-node map sym->iden expr)
         (symbol? expr) (sym->eval-node sym->iden expr)
-        :else expr))
+        :else          expr))
 
 ;; Recursively walks macroexpanded code and adds meta information about var usage.
 ;; First arg: map from symbol to identity symbol.
