@@ -33,3 +33,14 @@
       (is (= 1 @x))
       (var-set x 2)
       (is (= 2@x)))))
+
+(deftest test-expr-meta
+  (testing "Meta is evaluated for def forms"
+    (is (= "12" (with-out-str (def ^{:a (print 1)} a1 (print 2)))))
+    (is (= "112" (with-out-str (defonce ^{:a (print 1)} a2 (print 2)))))
+    (is (= "1" (with-out-str (defonce ^{:a (print 1)} a2 (print 2))))))
+  (testing "Meta is evaluated before expression"
+    (is (= "123" (with-out-str ^{(print 2) (print 3)} {:b (print 1)})))
+    (is (= "123" (with-out-str ^{(print 2) (print 3)} [:b (print 1)])))
+    (is (= "123" (with-out-str ^{(print 2) (print 3)} #{:b (print 1)}))))
+    (is (= "123" (with-out-str [^{:b ^{:b (print 3)} {:c (print 2)}} [(print 1) 5]]))))

@@ -19,7 +19,7 @@
     [clojure.java.io :as io]
     [clojure.pprint :as pprint :refer [pprint pp]]
     clojure.string
-    clojure.set
+    [clojure.set :as set]
     [clojure.test :refer [deftest testing is are]]
                                         ;clojure.walk
                                         ;[clojure.zip :as zip]
@@ -172,7 +172,7 @@
          (into (empty expanded) (map (partial iter &env) expanded))
 
          (map? expanded)
-         (into {} (for [[k v] expanded] [(iter &env k) (iter &env v)]))
+         (into (empty expanded) (for [[k v] expanded] [(iter &env k) (iter &env v)]))
 
          :else ;; scalars
          expanded)))
@@ -181,7 +181,7 @@
 (defprotocol EvalNode
   (evalme [this #^objects bindings]))
 
-;; TODO: inst and uuid?
+;; These types evaluate to themselves so it would be redundant wrap them in an reified EvalNode instance.
 (extend-protocol EvalNode
   nil                            (evalme [_ _] nil)
   Number                         (evalme [t _] t)
@@ -189,10 +189,7 @@
   Character                      (evalme [t _] t)
   String                         (evalme [t _] t)
   java.util.regex.Pattern        (evalme [t _] t)
-  clojure.lang.Keyword           (evalme [t _] t)
-  clojure.lang.IPersistentVector (evalme [t b] (mapv #(evalme % b) t))
-  clojure.lang.IPersistentMap    (evalme [t b] (reduce-kv (fn [m k v] (assoc m (evalme k b) (evalme v b))) {} t))
-  clojure.lang.IPersistentSet    (evalme [s b] (into (empty s) (for [x s] (evalme x b)))))
+  clojure.lang.Keyword           (evalme [t _] t))
 
 ;; TODO: test with interfaces instead of protocols!
 (defmacro gen-eval-node
@@ -202,10 +199,8 @@
 (declare ->eval-node)
 
 ;; &a is a hash-map of identity-symbol to index in local bindings.
-(defmulti seq->eval-node (fn [iden->idx recur-indices form]
-                           (assert (map? iden->idx))
-                           (first form))
-  :default ::default)
+(defmulti seq->eval-node (fn [iden->idx recur-indices form] (first form))
+                         :default ::default)
 
 ;; return list of lists
 (defn- var->arglists [v]
@@ -610,7 +605,12 @@
         (throw (ex-info (str "Cannot resolve symbol! " expr) {:symbol expr}))))))
 
 (defn- coll->eval-node [fmap sym->iden expr]
-  (into (empty expr) (fmap (partial ->eval-node sym->iden nil)) expr))
+  (let [elem-nodes (into [] (fmap (partial ->eval-node sym->iden nil)) expr)
+        init       (empty expr)]
+    (if-let [meta-node (->eval-node sym->iden nil (::meta-exp (meta expr)))]
+      (gen-eval-node (with-meta (into init (fmap #(evalme % &b)) elem-nodes)
+                                (evalme meta-node &b)))
+      (gen-eval-node (into init (fmap #(evalme % &b)) elem-nodes)))))
 
 (defn ->eval-node [sym->iden recur-indices expr]
   (when recur-indices
@@ -649,16 +649,24 @@
 ;; set and vector: recursively run for all elements and merge meta keys
 (doseq [t [clojure.lang.IPersistentVector clojure.lang.IPersistentSet]]
   (defmethod enhance-code t [sym->iden coll]
-    (let [elems (for [c coll] (enhance-code sym->iden c))]
+    (let [enhanced-meta (enhance-code sym->iden (meta coll))
+          elems         (for [c coll] (enhance-code sym->iden c))]
       (with-meta (into (empty coll) elems)
-        {::symbol-used       (set (mapcat (comp ::symbol-used meta) elems))
-         ::symbol-introduced (set (mapcat (comp ::symbol-introduced meta) elems))}))))
+        {::meta-exp          enhanced-meta
+         ::symbol-used       (set/union (set (mapcat (comp ::symbol-used meta) elems))
+                                        (::symbol-used (meta enhanced-meta)))
+         ::symbol-introduced (set/union (set (mapcat (comp ::symbol-introduced meta) elems))
+                                        (::symbol-introduced (meta enhanced-meta)))}))))
 
 (defmethod enhance-code clojure.lang.IPersistentMap [sym->iden coll]
-  (let [elems (for [kv coll, c kv] (enhance-code sym->iden c))]
-    (with-meta             (apply hash-map elems)
-      {::symbol-used       (set (mapcat (comp ::symbol-used meta) elems))
-       ::symbol-introduced (set (mapcat (comp ::symbol-introduced meta) elems))})))
+  (let [enhanced-meta (enhance-code sym->iden (meta coll))
+        elems         (for [kv coll, c kv] (enhance-code sym->iden c))]
+    (with-meta (apply hash-map elems)
+        {::meta-exp          enhanced-meta
+         ::symbol-used       (set/union (set (mapcat (comp ::symbol-used meta) elems))
+                                        (::symbol-used (meta enhanced-meta)))
+         ::symbol-introduced (set/union (set (mapcat (comp ::symbol-introduced meta) elems))
+                                        (::symbol-introduced (meta enhanced-meta)))})))
 
 (doseq [t '[let* loop*]]
   (defmethod enhance-code t [sym->iden [form bindings & bodies]]
