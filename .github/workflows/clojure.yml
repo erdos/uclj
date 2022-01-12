@@ -22,23 +22,30 @@ jobs:
       run: lein test
     - name: Run standard clojure tests
       run: lein run test/clojure_core_test.clj --test
-  native:
+    - name: Build JAR
+      run: lein uberjar
+    - name: Run jar tests
+      run: java -jar target/uclj-*-standalone.jar test/clojure_core_test.clj --test
+    - name: Upload JAR file
+      uses: actions/upload-artifact@v2
+      with:
+        path: target/uclj-*-standalone.jar
+        name: uclj-standalone.jar
+  linux:
+    needs: [build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+      - uses: actions/download-artifact@v1
+        with:
+          name: uclj-standalone.jar
+          path: .
       - uses: graalvm/setup-graalvm@v1
         with:
           version: 'latest'
           java-version: '11'
           components: 'native-image'
           github-token: ${{ secrets.GITHUB_TOKEN }}      
-      - uses: actions/cache@v1
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-${{ hashFiles('**/project.clj') }}
-          restore-keys: |
-            ${{ runner.os }}-maven-
-      - run: lein compile
       - run: bash ./build-graal.sh
       - name: Run Compatibility Tests
         run: ./uclj test/clojure_core_test.clj --test
