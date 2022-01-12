@@ -2,16 +2,13 @@
 
 set -euxo pipefail
 
-if [ -n "${GRAALVM_HOME-}" ]
-then
+if [ -n "${GRAALVM_HOME-}" ]; then
     NATIVE_IMAGE="$GRAALVM_HOME/bin/native-image"
 else
     NATIVE_IMAGE=native-image
 fi
 
 command -v $NATIVE_IMAGE
-
-lein uberjar
 
 JARFILE=`ls target/uclj*-standalone.jar`
 
