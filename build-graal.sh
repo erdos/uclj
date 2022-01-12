@@ -15,6 +15,12 @@ lein uberjar
 
 JARFILE=`ls target/uclj-*-standalone.jar`
 
+if [ ! -f "$JARFILE" ]; then
+    lein uberjar
+else
+    echo "Jar file already exists!"
+fi
+
 $NATIVE_IMAGE \
     --no-fallback \
     -H:ReflectionConfigurationFiles=reflectconfig \
