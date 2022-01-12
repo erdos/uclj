@@ -56,7 +56,7 @@ jobs:
           name: uclj-linux-amd64.zip
   macos:
     needs: [build]
-    runs-on: macoos-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v2
       - uses: actions/download-artifact@v1
