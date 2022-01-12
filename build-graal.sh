@@ -13,7 +13,7 @@ command -v $NATIVE_IMAGE
 
 lein uberjar
 
-JARFILE=`ls target/uclj-*-standalone.jar`
+JARFILE=`ls target/uclj*-standalone.jar`
 
 if [ ! -f "$JARFILE" ]; then
     lein uberjar
