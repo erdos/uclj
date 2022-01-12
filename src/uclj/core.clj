@@ -775,7 +775,9 @@
     (and (first args) (.exists (io/file (first args))))
     (do (evaluator `(load-file ~(first args)))
         (when (=  "--test" (second args))
-          (apply clojure.test/run-tests (all-test-namespaces))))
+          (let [test-result (apply clojure.test/run-tests (all-test-namespaces))]
+            (when-not (zero? (:fail test-result))
+              (System/exit 1)))))
 
     :else ;; interactive mode
     (do (println "Welcome to the small interpreter!")
