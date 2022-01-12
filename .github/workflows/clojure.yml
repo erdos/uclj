@@ -39,7 +39,7 @@ jobs:
       - uses: actions/download-artifact@v1
         with:
           name: uclj-standalone.jar
-          path: ./target/uclj-standalone.jar
+          path: ./target
       - run: find .
       - uses: graalvm/setup-graalvm@v1
         with:
@@ -63,7 +63,7 @@ jobs:
       - uses: actions/download-artifact@v1
         with:
           name: uclj-standalone.jar
-          path: ./target/uclj-standalone.jar
+          path: ./target
       - run: find .
       - uses: graalvm/setup-graalvm@v1
         with:
