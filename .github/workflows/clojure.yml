@@ -54,3 +54,26 @@ jobs:
         with:
           path: uclj
           name: uclj-linux-amd64.zip
+  macos:
+    needs: [build]
+    runs-on: macoos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/download-artifact@v1
+        with:
+          name: uclj-standalone.jar
+          path: .
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          version: 'latest'
+          java-version: '11'
+          components: 'native-image'
+          github-token: ${{ secrets.GITHUB_TOKEN }}      
+      - run: bash ./build-graal.sh
+      - name: Run Compatibility Tests
+        run: ./uclj test/clojure_core_test.clj --test
+      - name: Upload artifact
+        uses: actions/upload-artifact@v2
+        with:
+          path: uclj
+          name: uclj-macos.zip
