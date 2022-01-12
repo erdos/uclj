@@ -40,4 +40,10 @@ jobs:
             ${{ runner.os }}-maven-
       - run: lein compile
       - run: bash ./build-graal.sh
+      - name: Run Compatibility Tests
       - run: ./uclj test/clojure_core_test.clj --test
+      - name: Upload artifact
+        uses: actions/upload-artifact@v2
+        with:
+          path: uclj
+          name: uclj-linux-amd64.zip
