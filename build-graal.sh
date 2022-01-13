@@ -23,4 +23,7 @@ $NATIVE_IMAGE \
     -H:ReflectionConfigurationFiles=reflectconfig \
     --initialize-at-build-time \
     --allow-incomplete-classpath  \
-    -jar $JARFILE uclj
+    -jar $JARFILE \
+    uclj
+
+chmod a+x uclj
