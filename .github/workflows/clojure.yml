@@ -54,7 +54,7 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           path: uclj
-          name: uclj-linux-amd64.zip
+          name: uclj-linux-amd64
   macos:
     needs: [build]
     runs-on: macos-latest
@@ -78,4 +78,4 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           path: uclj
-          name: uclj-macos-amd64.zip
+          name: uclj-macos-amd64
