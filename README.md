@@ -12,7 +12,7 @@ It is built on top of the Clojure JVM runtime, but the parts that need dynamic c
 
 ## Usage
 
-Download (or compile) the standalone `uclj` binary and just run it:
+Download the binary from the [Release page](https://github.com/erdos/uclj/releases) and run the `uclj` command:
 - call `uclj` without parameters to get a REPL
 - call `uclj filename.clj` to load a file
 - call `uclj filename.clj --test` to load a file and then run all test cases in it
@@ -20,7 +20,7 @@ Download (or compile) the standalone `uclj` binary and just run it:
 
 ### Build
 
-You will need [Leiningen](https://leiningen.org/) to build the application. Set the `GRAALVM_HOME` environment variable and run the `build-graal.sh` script.
+You can also build the binary yourself. You will need [Leiningen](https://leiningen.org/) and [GraalVM](https://www.graalvm.org/downloads/) to build the application. Set the `GRAALVM_HOME` environment variable and run the `build-graal.sh` script.
 
 ### Benchmarks
 
