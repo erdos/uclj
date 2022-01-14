@@ -1,0 +1,27 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download artifacts
+      uses: dawidd6/action-download-artifact@v2
+      with:
+        workflow: clojure.yml
+        workflow_conclusion: success
+        path: artifacts
+    - run: tar -zcvf uclj-macos-amd64.tar.gz artifacts/uclj-macos-amd64/uclj
+    - run: tar -zcvf uclj-linux-amd64.tar.gz artifacts/uclj-linux-amd64/uclj
+    - uses: "marvinpinto/action-automatic-releases@latest"
+      with:
+        repo_token: "${{ secrets.GITHUB_TOKEN }}"
+        prerelease: false
+        draft: true
+        token: ${{ secrets.GITHUB_TOKEN }}
+        files: |
+          uclj-*.tar.gz
