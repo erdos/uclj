@@ -437,28 +437,30 @@
                                   `(aset ~'&b ~(idx-symbols i) (evalme ~(node-symbols i) ~'&b )))
                               (evalme ~'body-node ~'&b)))])))))))
 
+(def ^:const max-loop-bindings 24)
 (defmethod seq->eval-node 'loop* seq-eval-loop [iden->idx _ [_ bindings & bodies :as def]]
   (assert (even? (count bindings)))
   (assert (vector? (::symbol-loop (meta def))))
   (assert (every? symbol? (::symbol-loop (meta def))))
-  (let [[node0 node1 node2 node3 node4 node5] (for [[k v] (partition 2 bindings)] (->eval-node iden->idx nil v))
+  (let [bindings-nodes                  (for [[_ v] (partition 2 bindings)] (->eval-node iden->idx nil v))
         recur-indices                   (mapv iden->idx (::symbol-loop (meta def)))
-        body-node                       (seq->eval-node iden->idx recur-indices (list* 'do bodies))
-        [idx0 idx1 idx2 idx3 idx4 idx5] recur-indices]
-    (template [idx-symbols  (mapv #(symbol (str 'idx %)) (range 20))
-               node-symbols (mapv #(symbol (str 'node %)) (range 20))]
+        body-node                       (seq->eval-node iden->idx recur-indices (list* 'do bodies))]
+    (template [idx-symbols  (mapv #(symbol (str 'idx %)) (range max-loop-bindings))
+               node-symbols (mapv #(symbol (str 'node %)) (range max-loop-bindings))]
       (case (count bindings)
         ~@(mapcat seq
-                  (for [i (range 6)]
+                  (for [i (range (inc max-loop-bindings))]
                     [(* 2 i)
-                      `(gen-eval-node
-                        (do ~@(for [i (range i)]
-                                `(aset ~'&b ~(idx-symbols i) (evalme ~(node-symbols i) ~'&b )))
-                            (loop []
-                             (let [result# (evalme ~'body-node ~'&b)]
-                              (if (identical? ::recur result#)
-                                (recur)
-                                result#)))))]))))))
+                     `(let [[~@(take i node-symbols)] ~'bindings-nodes
+                            [~@(take i idx-symbols)]  ~'recur-indices]
+                        (gen-eval-node
+                         (do ~@(for [i (range i)]
+                                 `(aset ~'&b ~(idx-symbols i) (evalme ~(node-symbols i) ~'&b )))
+                             (loop []
+                               (let [result# (evalme ~'body-node ~'&b)]
+                                 (if (identical? ::recur result#)
+                                   (recur)
+                                   result#))))))]))))))
 
 (defmethod seq->eval-node 'new seq-eval-new [&a recur-indices [_ class-name & args]]
   (let [clz (symbol->class class-name)
