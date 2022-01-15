@@ -41,7 +41,7 @@
             (cond ('#{clojure.core/unquote-splicing} t) (evaling s)
                   ('#{clojure.core/unquote} t)          [(evaling s)]
                   :else                                 [(doall (mapcat unroll expr))]))]
-    (binding [*template-vars* (eval `(let [~@bindings] ~(do (into {} (for [s (flatten (take-nth 2 bindings))] [(list 'quote s) s])))))]
+    (binding [*template-vars* (eval `(let [~@bindings] ~(into {} (for [s (flatten (take-nth 2 bindings))] [(list 'quote s) s]))))]
       (first (unroll expr)))))
 
 ;; Works like an inlined defmacro call: The expression in (template) calls will be the result of the macro expansion.
@@ -118,7 +118,10 @@
         :else                                        exp))
 
 (defn- macroexpand-code [&env exp]
-  (let [e (macroexpand-1-code &env exp)] (if (identical? e exp) exp (recur &env e))))
+  (let [e (macroexpand-1-code &env exp)]
+    (if (identical? e exp)
+      exp
+      (recur &env e))))
 
 ;; return seq of (fn-name ([args*] bodies*)+)
 (defn- parsed-fn [[_ & bodies]]
@@ -627,7 +630,7 @@
 ;; (defmethod enhance-code 'case* [sym->iden [_ value shift mask default-value imap switch-type mode skip-check]])
 
 (defmethod enhance-code clojure.lang.Symbol [sym->iden s]
-  (if-let [iden (get sym->iden s)]
+  (if-let [iden (sym->iden s)]
     (with-meta s {::symbol-identity iden, ::symbol-used #{iden}})
     s))
 
@@ -671,9 +674,9 @@
          ::symbol-loop       (when (= form 'loop*) (mapv sym->iden (take-nth 2 bindings)))}))))
 
 (defmethod enhance-code 'def [sym->iden [_ var-sym & tail]]
-  (let [var-sym (vary-meta var-sym (partial reduce-kv (fn [m k v] (assoc m (enhance-code sym->iden k) (enhance-code sym->iden v))) {}))
-        tail    (map (partial enhance-code sym->iden) tail)
-        all-metas (cons (meta (last tail)) (map meta (mapcat seq (meta var-sym))))]
+  (let [var-sym   (vary-meta var-sym (partial reduce-kv (fn [m k v] (assoc m (enhance-code sym->iden k) (enhance-code sym->iden v))) {}))
+        tail      (map (partial enhance-code sym->iden) tail)
+        all-metas (map meta (cons (last tail) (mapcat seq (meta var-sym))))]
     (with-meta (list* 'def var-sym tail)
       {::symbol-used       (set (mapcat ::symbol-used       all-metas))
        ::symbol-introduced (set (mapcat ::symbol-introduced all-metas))})))
@@ -693,7 +696,6 @@
                     {::symbol-used       (set (remove new-acc-1 (mapcat (comp ::symbol-used meta) bodies)))
                      ::fn-sym-own        (new-acc fname)
                      ::fn-sym-introduced (-> symbol-loop ;; arguments + let vars
-                                             ; (cond-> fname (conj (new-acc fname)))
                                              (into (set (mapcat (comp ::symbol-introduced meta) bodies))))
                      ::symbol-loop       symbol-loop
                      #_(set (keys new-acc-1))}))]
@@ -705,13 +707,12 @@
   (let [bodies  (remove (fn [x] (and (seq? x) ('#{finally catch} (first x)))) xs)
         catches (filter (fn [x] (and (seq? x) (= 'catch (first x)))) xs)
         finally (some (fn [x] (when (and (seq? x) (= 'finally (first x))) x)) xs)
-        ,,,,,
         catch-identity (gensym)
         bodies  (for [body bodies] (enhance-code sym->iden body))
         catches (for [[c t e & tail] catches
                       :let [sym->iden (assoc sym->iden e catch-identity)]]
                   (list* c t (with-meta e {::symbol-identity catch-identity})
-                         (for [body tail] (enhance-code sym->iden body))))
+                         (map (partial enhance-code sym->iden) tail)))
         catch-metas    (for [[c t e & tail] catches, x tail] (meta x))
         finally-bodies (seq (for [body (next finally)] (enhance-code sym->iden body)))]
     (with-meta
@@ -791,7 +792,7 @@
                      (var-set-reset! #'*2 *1)
                      (var-set-reset! #'*1 e)
                      (println e))
-                   (catch Throwable t 
+                   (catch Throwable t
                      (.printStackTrace t)
                      (var-set-reset! #'*e t)))
               (recur))))

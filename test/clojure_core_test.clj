@@ -1,5 +1,6 @@
 (ns clojure-core-test
-  (:require [clojure.test :refer :all]))
+  (:require [clojure.data.xml]
+            [clojure.test :refer :all]))
 
 (deftest test-numbers
   (clojure.test/is (= 2 (inc 1)))
@@ -44,3 +45,6 @@
     (is (= "123" (with-out-str ^{(print 2) (print 3)} [:b (print 1)])))
     (is (= "123" (with-out-str ^{(print 2) (print 3)} #{:b (print 1)}))))
     (is (= "123" (with-out-str [^{:b ^{:b (print 3)} {:c (print 2)}} [(print 1) 5]]))))
+
+(deftest test-xml-lib
+  (is (map? (clojure.data.xml/parse-str "<a>1</a>"))))
