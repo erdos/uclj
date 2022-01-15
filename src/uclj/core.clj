@@ -29,7 +29,7 @@
 
 (run! require namespaces-to-require)
 
-(def ^:private ^:dynamic *template-vars* {})
+(def ^:dynamic *template-vars* {})
 (defn- template* [bindings expr]
   (assert (vector? bindings))
   (letfn [(unroll [expr] (cond (seq? expr) (unroll-seq expr)
@@ -401,17 +401,28 @@
                                           [arity (->eval-node iden->idx recur-indices (list* 'do bodies))]))]
     (make-fn-body fname symbol-used arity->body-node arity->symbols-introduced iden->idx vararg-arity)))
 
+(def ^:const max-let-bindings 32)
+
 (defmethod seq->eval-node 'let* seq-eval-let [iden->idx recur-indices [_ bindings & bodies :as form]]
   (cond
     ;; can merge (let*) forms
-    (and (= 1 (count bodies)) (seq? (first bodies)) (= 'let* (ffirst bodies)))
+    (and (= 1 (count bodies))
+         (< (count bindings) (* 2 max-let-bindings))
+         (seq? (first bodies)) (= 'let* (ffirst bodies)))
     (recur iden->idx recur-indices (list* 'let*
-                                           (into bindings (second (first bodies)))
-                                           (nnext (first bodies))))
-
+                                          (into bindings (second (first bodies)))
+                                          (nnext (first bodies))))
+    ;; it must have at most max-let-bindings binding vars
+    (> (count bindings) (* 2 max-let-bindings))
+    (recur iden->idx recur-indices
+           (list 'let*
+                 (vec (take (* 2 max-let-bindings) bindings))
+                 (list* 'let*
+                        (vec (drop (* 2 max-let-bindings) bindings))
+                        bodies)))
     :else
-    (template [idx-symbols  (mapv #(symbol (str 'idx- %)) (range 20))
-               node-symbols (mapv #(symbol (str 'node- %)) (range 20))]
+    (template [idx-symbols  (mapv #(symbol (str 'idx- %)) (range max-let-bindings))
+               node-symbols (mapv #(symbol (str 'node- %)) (range max-let-bindings))]
       (let [[~@(map vector idx-symbols node-symbols)]
             (for [[k v] (partition 2 bindings)]
               [(int (iden->idx (::symbol-identity (meta k))))
@@ -419,7 +430,7 @@
             body-node (seq->eval-node iden->idx recur-indices (list* 'do bodies))]
         (case (count bindings)
           ~@(mapcat seq
-                    (for [i (range 20)]
+                    (for [i (range (inc max-let-bindings))]
                       [(* 2 i)
                         `(gen-eval-node
                           (do ~@(for [i (range i)]

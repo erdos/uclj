@@ -19,7 +19,14 @@
     (is (fn? (evaluator '(let [b :lol] (fn [] (let [_ b] :hi)))))))
 
   (testing "Shadow lexical bindings"
-    (is (= 4 (evaluator '(let [inc dec] (inc 5)))))))
+    (is (= 4 (evaluator '(let [inc dec] (inc 5))))))
+
+  (testing "let forms with many bindings"
+    (template [varnames (repeatedly gensym)]
+       (do ~@(for [i (range 0 100 5)]
+               `(is (= (reduce + (range ~i))
+                       (evaluator '(let [~@(interleave varnames (range i))]
+                                     (+ ~@(take i varnames)))))))))))
 
 (deftest test-eval-try
   (testing "try-catch maintains sybol usage across closure"
@@ -145,8 +152,8 @@
                    (evaluator '(loop [i 2] (case (recur (dec i)) 1 1 2 2 :three)))))))
 
   (testing "used vars in case are correctly encapsulated in closure"
-    (is (= :ok 
-          (evaluator '(let [a :ok b :w1 c :w2] ((fn [t] (case t, 1 a, 2 b, c)) 1))))))
+    (is (= :ok
+           (evaluator '(let [a :ok b :w1 c :w2] ((fn [t] (case t, 1 a, 2 b, c)) 1))))))
 
   (testing "Identity checking because all cases are keywords"
     (testing "All keys have different hashes"
