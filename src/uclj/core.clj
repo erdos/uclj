@@ -475,27 +475,23 @@
        (let [args (for [a args] (evalme a &b))]
          (clojure.lang.Reflector/invokeConstructor clz (into-array Object args)))))))
 
-(def ^:private node-symbols (for [i (range)] (symbol (str 'node- i))))
-(def ^:private index-symbols (for [i (range)] (symbol (str 'index i))))
-
 (defmethod seq->eval-node 'recur seq-eval-recur [iden->idx recur-indices [_ & values]]
   (when-not recur-indices
     (throw (new UnsupportedOperationException "Can only recur from tail position")))
   (when-not (= (count recur-indices) (count values))
     (throw (new IllegalArgumentException (str "Mismatched argument count to recur, expected: " (count recur-indices) " args, got: " (count values)))))
-  (template
+  (template [node-symbols  (for [i (range)] (symbol (str 'node- i)))
+             index-symbols (for [i (range)] (symbol (str 'index i)))]
     (case (count ~'recur-indices)
       ~@(mapcat seq
-          (for [i (range 20)
-                :let [node-symbols  (take i node-symbols)
-                      index-symbols (take i index-symbols)]]
+          (for [i (range max-loop-bindings)]
             [i
-              `(let [[~@node-symbols]  (map (partial ->eval-node ~'iden->idx nil) ~'values)
-                     [~@index-symbols] ~'recur-indices]
-                 (gen-eval-node
-                   (let [~@(interleave node-symbols (for [n node-symbols] (list 'evalme n '&b)))]
-                     ~@(map (partial list 'aset '&b) index-symbols node-symbols)
-                     ::recur)))])))))
+             `(let [[~@(take i node-symbols)]  (map (partial ->eval-node ~'iden->idx nil) ~'values)
+                    [~@(take i index-symbols)] ~'recur-indices]
+                (gen-eval-node
+                 (let [~@(interleave (take i node-symbols) (for [n node-symbols] (list 'evalme n '&b)))]
+                   ~@(map (partial list 'aset '&b) (take i index-symbols) (take i node-symbols))
+                   ::recur)))])))))
 
 (defmethod seq->eval-node 'throw [&a _ [_ e :as form]]
   (assert (= 2 (count form)))
