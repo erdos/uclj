@@ -23,6 +23,7 @@ $NATIVE_IMAGE \
     -H:ReflectionConfigurationFiles=reflectconfig \
     --initialize-at-build-time \
     --allow-incomplete-classpath  \
+    --enable-url-protocols=http,https \
     -jar $JARFILE \
     uclj
 
