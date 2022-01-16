@@ -26,17 +26,21 @@ You can also build the binary yourself. You will need [Leiningen](https://leinin
 
 The author's [Advent Of Code 2021 Clojure solutions](https://github.com/erdos/advent-of-code) are used for benchmarking. The values are runtimes in _mean + standard deviation_ format in milliseconds, the smaller is the better. See `benchmark.clj` for details.
 
-| test case | uclj | [bb v0.7.0](https://github.com/babashka/babashka) | [clojure 1.10.3](https://clojure.org/)
+| test case | uclj | [bb v0.7.3](https://github.com/babashka/babashka) | [clojure 1.10.3](https://clojure.org/)
 | --------- | ---- | ------------------------------------------------- | ---------------------------------------
-| day1.clj  |          18+6          |      29+1         |       931+62
-| day2.clj  |          36+23         |      30+1         |       925+34
-| day3.clj  |          65+7          |      183+23       |       1024+69
-| day4.clj  |          216+6          |     457+1        |       1073+52
-| day5.clj  |          4599+42        |     5009+169     |       2629+226
-| day6.clj  |          11+0           |     9+0          |       894+6
-| day8.clj  |          105+6          |     106+0        |       1284+172
-| day9.clj  |          645+3          |     661+118      |       1607+37
-| day24.clj |          4639+175       |     7494+98      |       1409+13
+| day1.clj   | 22+1       | 30+1       | 913+40
+| day2.clj   | 25+1       | 32+1       | 936+16
+| day3.clj   | 66+2       | 180+7      | 1032+24
+| day4.clj   | 184+5      | 515+15     | 1062+40
+| day5.clj   | 4675+26    | 4823+15    | 2385+63
+| day6.clj   | 14+1       | 9+0        | 893+48
+| day7.clj   | 25397+91   | 24825+477  | 12172+151
+| day8.clj   | 82+2       | 106+1      | 1064+45
+| day9.clj   | 405+12     | 503+14     | 1131+43
+| day11.clj  | 515+15     | 1181+43    | 1229+35
+| day17.clj  | 3861+80    | 5152+143   | 1167+30
+| day19.clj  | 2460+37    | 5761+145   | 2762+53
+| day24.clj  | 1535+4     | 7266+163   | 1491+36
 
 For light tasks with high number of function invocations and loops, `uclj` can be the fastest. For heavier tasks, running the `clojure` command is still winning.
 
