@@ -244,9 +244,9 @@
         (apply call-factory args)
         (template [a-symbol #(symbol (str 'a %))]
           (case (count args)
-            ~@(for [i (range 16)]
-                [i (list 'gen-eval-node (list* '.invoke (quote ^clojure.lang.IFn (evalme f &b))
-                                                (for [j (range 1 (inc i))] (list 'evalme (a-symbol j) '&b))))])
+            ~@(mapcat seq (for [i (range 16)]
+                            [i (list 'gen-eval-node (list* '.invoke (quote ^clojure.lang.IFn (evalme f &b))
+                                                           (for [j (range 1 (inc i))] (list 'evalme (a-symbol j) '&b))))]))
             ;; else
             (gen-eval-node (apply (evalme f &b) (for [e args] (evalme e &b))))))))))
 
