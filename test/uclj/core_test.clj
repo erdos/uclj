@@ -28,6 +28,10 @@
                        (evaluator '(let [~@(interleave varnames (range i))]
                                      (+ ~@(take i varnames)))))))))))
 
+(deftest test-eval-sym
+  (testing "taking value of macro"
+    (is (thrown? RuntimeException (evaluator '(do ->))))))
+
 (deftest test-eval-try
   (testing "try-catch maintains sybol usage across closure"
       (is (= 2 (evaluator '(let [a 1 b 2 c 3]
