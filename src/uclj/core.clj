@@ -711,7 +711,8 @@
                                              (into (set (mapcat (comp ::symbol-introduced meta) bodies))))
                      ::symbol-loop       symbol-loop
                      #_(set (keys new-acc-1))}))
-        meta-exp (enhance-code sym->iden (meta fn-expression))]
+        meta-map (-> (meta fn-expression) (dissoc :line :column :file) (not-empty))
+        meta-exp (enhance-code sym->iden meta-map)]
     (with-meta (if fname (list* 'fn* fname fbodies) (list* 'fn* fbodies))
       ;; symbol-introduced is nil because it is a new closure!
       {::meta-exp    meta-exp

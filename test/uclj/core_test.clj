@@ -47,7 +47,7 @@
     (is (fn? (evaluator '((fn f [] f))))))
 
   (testing "Meta is evaluated on fn"
-    (is (= 1 (:a (meta (evaluator '(do ^{:a 1} (fn [])))))))
+    (is (= {:a 1} (meta (evaluator '(do ^{:a (inc 0)} (fn []))))))
     (is (= "1" (evaluator '(with-out-str ^{:a (print 1)} (fn ^{:b (print 2)} x []))))))
 
   (testing "Recur with single arg"
