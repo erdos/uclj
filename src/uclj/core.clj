@@ -561,10 +561,11 @@
   (defmethod seq->eval-node lf [&a _ [_ fname]]
     (let [arg (->eval-node &a nil fname)]
       (gen-eval-node
-       (with-open [in (new java.io.PushbackReader (io/reader (io/file (evalme arg &b))))]
-         (doseq [read (repeatedly #(read {:eof ::eof} in))
-                 :while (not= ::eof read)]
-           (evaluator read)))))))
+       (binding [*file* (io/file (evalme arg &b))]
+         (with-open [in (new java.io.PushbackReader (io/reader *file*))]
+           (doseq [read (repeatedly #(read {:eof ::eof} in))
+                   :while (not= ::eof read)]
+             (evaluator read))))))))
 
 ;; Needed by (ns) forms.
 (defmethod seq->eval-node 'clojure.core/with-loading-context [&a _ [_ & bodies]]
