@@ -8,7 +8,7 @@ It is built on top of the Clojure JVM runtime, but the parts that need dynamic c
 
 - Starts quickly (it is compiled with GraalVM native-image)
 - Small (≪1K SLOC)
-- Out of the Box [core.async](https://github.com/clojure/core.async) support and also [some other core libraries](https://github.com/erdos/uclj/blob/master/src/uclj/core.clj#L10)
+- Out of the Box [core.async](https://github.com/clojure/core.async) support and also [many other core libraries](https://github.com/erdos/uclj/blob/master/src/uclj/core.clj#L10)
 
 ## Usage
 

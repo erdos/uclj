@@ -10,7 +10,7 @@
 (def namespaces-to-require
   '[[clojure.core]
     [clojure.core.async :as async]
-                                        ;[clojure.core.logic :as logic]
+    [clojure.core.logic :as logic]
                                         ;clojure.data
                                         ;clojure.datafy
     [clojure.data.csv :as csv]

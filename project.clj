@@ -12,8 +12,7 @@
                  [org.clojure/data.json "2.4.0"]
                  [org.clojure/data.csv "1.0.0"]
                  [org.clojure/data.xml "0.2.0-alpha6"]
-                 [org.clojure/math.combinatorics "0.1.6"]
-                 ]
+                 [org.clojure/math.combinatorics "0.1.6"]]
   :main uclj.core
   :aot :all
   :java-source-paths ["src"]
