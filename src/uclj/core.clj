@@ -162,11 +162,13 @@
            fn*
            (let [[fname & bodies] (parsed-fn expanded)
                  &env             (if fname (add-env &env fname) &env)]
-             (concat '[fn*]
+             (with-meta
+               (concat '[fn*]
                      (when fname [fname])
                      (for [[args & bodies] bodies
                            :let [&env (reduce add-env &env args)]]
-                       (list* args (map (partial iter &env) bodies)))))
+                       (list* args (map (partial iter &env) bodies))))
+               (meta exp)))
 
            ;; else
            (map (partial iter &env) expanded))
@@ -316,9 +318,8 @@
        ;; else
        (let [butlast-body (doall (butlast bodies))
              last-body    (last bodies)]
-         (gen-eval-node
-          (do (doseq [x butlast-body] (evalme x &b))
-              (evalme last-body &b))))))))
+         (gen-eval-node (do (doseq [x butlast-body] (evalme x &b))
+                            (evalme last-body &b))))))))
 
 (defmethod seq->eval-node 'letfn* seq-eval-letfn [iden->idx recur-indices [_ bindings & bodies :as form]]
   (let [promises (for [[k f] (partition 2 bindings)
@@ -398,8 +399,10 @@
                                                                               (::fn-sym-introduced (meta def)))
                                                                       (range))
                                                     recur-indices (mapv iden->idx (::symbol-loop (meta def)))]]
-                                          [arity (->eval-node iden->idx recur-indices (list* 'do bodies))]))]
-    (make-fn-body fname symbol-used arity->body-node arity->symbols-introduced iden->idx vararg-arity)))
+                                          [arity (->eval-node iden->idx recur-indices (list* 'do bodies))]))
+        meta-node                 (->eval-node iden->idx nil (::meta-exp (meta form)))]
+    (cond-> (make-fn-body fname symbol-used arity->body-node arity->symbols-introduced iden->idx vararg-arity)
+      meta-node (-> (evalme &b) (with-meta (evalme meta-node &b)) (gen-eval-node)))))
 
 (def ^:const max-let-bindings 32)
 
@@ -707,10 +710,12 @@
                      ::fn-sym-introduced (-> symbol-loop ;; arguments + let vars
                                              (into (set (mapcat (comp ::symbol-introduced meta) bodies))))
                      ::symbol-loop       symbol-loop
-                     #_(set (keys new-acc-1))}))]
+                     #_(set (keys new-acc-1))}))
+        meta-exp (enhance-code sym->iden (meta fn-expression))]
     (with-meta (if fname (list* 'fn* fname fbodies) (list* 'fn* fbodies))
       ;; symbol-introduced is nil because it is a new closure!
-      {::symbol-used (set (mapcat (comp ::symbol-used meta) fbodies))})))
+      {::meta-exp    meta-exp
+       ::symbol-used (set (mapcat (comp ::symbol-used meta) fbodies))})))
 
 (defmethod enhance-code 'try [sym->iden [_ & xs]]
   (let [bodies  (remove (fn [x] (and (seq? x) ('#{finally catch} (first x)))) xs)
