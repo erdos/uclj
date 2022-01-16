@@ -595,9 +595,12 @@
       (gen-eval-node (aget #^objects &b index)))
     (if (var? (resolve expr))
       (let [^clojure.lang.Var resolved-expr (resolve expr)]
-        (if (and (bound? resolved-expr) (not (.isDynamic resolved-expr)))
-          (let [expr-val @resolved-expr] (gen-eval-node {::var resolved-expr} expr-val))
-          (gen-eval-node {::unbound-var resolved-expr} @resolved-expr))) ;; var was unbound at compile time so we need to deref in in runtime
+        (cond (.isMacro resolved-expr)
+              (throw (new RuntimeException (str "Can't take value of a macro: " resolved-expr)))
+              (and (bound? resolved-expr) (not (.isDynamic resolved-expr)))
+              (let [expr-val @resolved-expr] (gen-eval-node {::var resolved-expr} expr-val))
+              :else
+              (gen-eval-node {::unbound-var resolved-expr} @resolved-expr))) ;; var was unbound at compile time so we need to deref in in runtime
       (if-let [parent (some-> expr namespace symbol resolve)]
         (if (class? parent)
           (gen-eval-node (clojure.lang.Reflector/getStaticField ^Class parent (name expr)))
