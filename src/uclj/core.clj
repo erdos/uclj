@@ -11,6 +11,8 @@
   '[[clojure.core]
     [clojure.core.async :as async]
     [clojure.core.logic :as logic]
+    [clojure.core.memoize :as memo]
+    [clojure.core.cache :as cache]
                                         ;clojure.data
                                         ;clojure.datafy
     [clojure.data.csv :as csv]
@@ -24,6 +26,9 @@
     [clojure.set :as set]
     [clojure.string :as s]
     [clojure.test :refer [deftest testing is are]]
+    [clojure.test.check :as check]
+    [clojure.tools.cli :as cli]
+    [clojure.tools.trace :as trace]
     [clojure.walk :as walk]
     [clojure.zip :as zip]])
 

@@ -13,3 +13,4 @@ pom.xml.asc
 .hg/
 *.build_artifacts.txt
 /uclj
+/reports
