@@ -20,7 +20,11 @@ fi
 
 $NATIVE_IMAGE \
     --no-fallback \
+    --no-server \
+    --verbose \
+    --native-image-info \
     -H:ReflectionConfigurationFiles=reflectconfig \
+    -H:+ReportExceptionStackTraces \
     --initialize-at-build-time \
     --allow-incomplete-classpath  \
     --enable-url-protocols=http,https \
