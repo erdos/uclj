@@ -46,5 +46,9 @@
     (is (= "123" (with-out-str ^{(print 2) (print 3)} #{:b (print 1)}))))
     (is (= "123" (with-out-str [^{:b ^{:b (print 3)} {:c (print 2)}} [(print 1) 5]]))))
 
+(deftest test-arrays
+  ;; Long[][][][]... is not supported by the closed-world assumption
+  (is (every? some? (take 10 (iterate (fn [x] (into-array [x])) 3)))))
+
 (deftest test-xml-lib
   (is (map? (clojure.data.xml/parse-str "<a>1</a>"))))

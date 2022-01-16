@@ -218,6 +218,29 @@
              (concat (repeatedly (- (count args) 2) gensym) '[& variadic])
              (repeatedly (count args) gensym))))))
 
+(def custom-var-impls (atom {}))
+(defmacro custom-var! [v val] `(swap! custom-var-impls assoc ~v ~val))
+
+(declare evaluator)
+(custom-var! #'clojure.core/load-file
+  (fn [fname]
+    (binding [*file* (io/file fname)]
+      (with-open [in (new java.io.PushbackReader (io/reader *file*))]
+        (doseq [read (repeatedly #(read {:eof ::eof} in))
+                :while (not= ::eof read)]
+          (evaluator read))))))
+
+;; Due to the closed-world assumption, we cannot instantiate array of any types.
+(custom-var! #'clojure.core/into-array
+  (fn ([xs]   (dorun xs) (try (into-array xs)   (catch IllegalArgumentException _ (into-array Object xs))))
+      ([x xs] (dorun xs) (try (into-array x xs) (catch IllegalArgumentException _ (into-array Object xs))))))
+
+(declare var-set-reset!)
+(custom-var! #'clojure.core/in-ns
+  (fn [new-ns]
+    (alter-meta! (var *ns*) assoc :dynamic true)
+    (var-set-reset! (var *ns*) (create-ns new-ns))))
+
 (def clojure-core-inlined-fns
   (template
    (hash-map
@@ -227,6 +250,7 @@
                     v     (vals (ns-publics ns))
                     :when (not (#{#'clojure.core/aget #'clojure.core/aclone ;; suppress reflection warning
                                   #'clojure.core/alength #'clojure.core/aset} v))
+                    :when (not (@custom-var-impls v))
                     :when (not (:macro (meta v)))
                     :let [arglists (var->arglists v)]
                     :when arglists]
@@ -553,25 +577,6 @@
       ;; runs in GraalVM but does nothing in REPL:
       (.doReset v new-val))))
 
-(doseq [lf '[in-ns clojure.core/in-ns]]
-  (defmethod seq->eval-node lf [&a _ [_ nssym]]
-    (let [sym-node (->eval-node &a nil nssym)]
-      (gen-eval-node
-       (let [new-ns (create-ns (evalme sym-node &b))]
-         (alter-meta! (var *ns*) assoc :dynamic true)
-         (var-set-reset! (var *ns*) new-ns))))))
-
-(declare evaluator)
-(doseq [lf '[clojure.core/load-file load-file]]
-  (defmethod seq->eval-node lf [&a _ [_ fname]]
-    (let [arg (->eval-node &a nil fname)]
-      (gen-eval-node
-       (binding [*file* (io/file (evalme arg &b))]
-         (with-open [in (new java.io.PushbackReader (io/reader *file*))]
-           (doseq [read (repeatedly #(read {:eof ::eof} in))
-                   :while (not= ::eof read)]
-             (evaluator read))))))))
-
 ;; Needed by (ns) forms.
 (defmethod seq->eval-node 'clojure.core/with-loading-context [&a _ [_ & bodies]]
   (seq->eval-node &a nil (list* 'do bodies)))
@@ -603,6 +608,9 @@
       (let [^clojure.lang.Var resolved-expr (resolve expr)]
         (cond (.isMacro resolved-expr)
               (throw (new RuntimeException (str "Can't take value of a macro: " resolved-expr)))
+              (contains? @custom-var-impls resolved-expr)
+              (let [custom-val (get @custom-var-impls resolved-expr)]
+                (gen-eval-node custom-val))
               (and (bound? resolved-expr) (not (.isDynamic resolved-expr)))
               (let [expr-val @resolved-expr] (gen-eval-node {::var resolved-expr} expr-val))
               :else
