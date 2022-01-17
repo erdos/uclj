@@ -531,10 +531,6 @@
   (let [e (->eval-node &a nil e)]
     (gen-eval-node (throw (evalme e &b)))))
 
-(defmethod seq->eval-node 'clojure.core/eval [&a _ [_ e]]
-  (let [e (->eval-node &a nil e)]
-    (gen-eval-node (-> e (evalme &b) (evalme nil)))))
-
 (defmethod seq->eval-node 'var [&a _ [_ v]]
   (let [x (resolve v)]
     (assert x (str "Unable to resolve var: " (pr-str v) " in this context in ns " *ns*))
@@ -695,8 +691,8 @@
                                    (mapcat (comp ::symbol-used meta)
                                            (concat bodies (take-nth 2 (next bindings))))))
           symbol-introduced (-> introduced-idents
-                                (into (mapcat (comp ::symbol-introduced meta) bodies))
-                                (into (mapcat (comp ::symbol-introduced meta) bindings)))]
+                                (into (mapcat (comp ::symbol-introduced meta)) bodies)
+                                (into (mapcat (comp ::symbol-introduced meta)) bindings))]
       (with-meta (list* form bindings bodies)
         {::symbol-used       symbol-used
          ::symbol-introduced symbol-introduced
@@ -753,15 +749,15 @@
                catches
                (when finally-bodies [(list* 'finally finally-bodies)]))
       {::symbol-used (-> #{}
-                         (into (mapcat (comp ::symbol-used meta) bodies))
-                         (into (mapcat ::symbol-used catch-metas))
-                         (into (mapcat (comp ::symbol-used meta) finally-bodies))
+                         (into (mapcat (comp ::symbol-used meta)) bodies)
+                         (into (mapcat ::symbol-used) catch-metas)
+                         (into (mapcat (comp ::symbol-used meta)) finally-bodies)
                          (->> (remove #{catch-identity}))
                          (set))
        ::symbol-introduced (-> #{}
-                               (into (mapcat (comp ::symbol-introduced meta) bodies))
-                               (into (mapcat ::symbol-introduced catch-metas))
-                               (into (mapcat (comp ::symbol-introduced meta) finally-bodies))
+                               (into (mapcat (comp ::symbol-introduced meta)) bodies)
+                               (into (mapcat ::symbol-introduced) catch-metas)
+                               (into (mapcat (comp ::symbol-introduced meta)) finally-bodies)
                                (cond-> (seq catches) (conj catch-identity)))})))
 
 (defmethod enhance-code 'letfn* [sym->iden [letfn* bindings & bodies]]
@@ -772,12 +768,12 @@
         bodies        (for [body bodies] (enhance-code sym->iden body))
         symbol-added  (set (map (comp ::symbol-identity meta first) binding-pairs))
         symbol-used   (-> #{}
-                          (into (mapcat (comp ::symbol-used meta second) binding-pairs))
-                          (into (mapcat (comp ::symbol-used meta) bodies))
+                          (into (mapcat (comp ::symbol-used meta second)) binding-pairs)
+                          (into (mapcat (comp ::symbol-used meta)) bodies)
                           (->> (remove symbol-added))
                           (set))
         symbol-introduced (-> #{}
-                              (into (mapcat (comp ::symbol-introduced meta) bodies))
+                              (into (mapcat (comp ::symbol-introduced meta)) bodies)
                               (into symbol-added))]
     (with-meta
       (list* letfn* (vec (apply concat binding-pairs)) bodies)
@@ -791,6 +787,8 @@
         node     (->eval-node {} nil enhanced)]
     ;; array is empty yet.
     (evalme node nil)))
+
+(custom-var! #'clojure.core/eval evaluator)
 
 (defn- all-test-namespaces []
   (for [ns (all-ns)
