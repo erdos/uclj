@@ -48,7 +48,15 @@
 
 (deftest test-arrays
   ;; Long[][][][]... is not supported by the closed-world assumption
-  (is (every? some? (take 10 (iterate (fn [x] (into-array [x])) 3)))))
+  (is (every? some? (take 10 (iterate (fn [x] (into-array [x])) 3))))
+  (testing "aclone"
+    (let [a (int-array [1 2 3 4])
+          b (aclone a)]
+      (is (every? integer? b))
+      (is (= 1 (aget a 0) (aget b 0)))
+      (testing "aget-aset"
+      (aset-int b 0 2)
+      (is (= 2 (aget b 0)))))))
 
 (deftest test-xml-lib
   (is (map? (clojure.data.xml/parse-str "<a>1</a>"))))
