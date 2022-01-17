@@ -801,17 +801,21 @@
   (evaluator '(run! require uclj.core/namespaces-to-require))
   (cond
     (and (first args) (.startsWith (str (first args)) "("))
-    (println (evaluator (read-string (first args))))
+    (binding [*command-line-args* (second args)]  
+      (println (evaluator (read-string (first args)))))
 
     (and (first args) (.exists (io/file (first args))))
-    (do (evaluator `(load-file ~(first args)))
-        (when (=  "--test" (second args))
-          (let [test-result (apply clojure.test/run-tests (all-test-namespaces))]
-            (when-not (zero? (:fail test-result))
-              (System/exit 1)))))
+    (let [test? (= "--test" (second args))]
+      (binding [*command-line-args* (if test? (nnext args) (next args))]
+        (evaluator `(load-file ~(first args))))
+      (when test?
+        (let [test-result (apply clojure.test/run-tests (all-test-namespaces))]
+          (when-not (zero? (:fail test-result))
+            (System/exit 1)))))
 
     :else ;; interactive mode
     (do (println "Welcome to the small interpreter!")
+        (var-set-reset! #'*command-line-args* args)
         (doseq [v [#'*1 #'*2 #'*3 #'*e]] (var-set-reset! v nil))
         (loop []
           (print (str (ns-name *ns*) "=> ")) (flush)
