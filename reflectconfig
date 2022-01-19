@@ -24,6 +24,9 @@
     {"name": "java.lang.AssertionError", "allDeclaredConstructors": true},
     {"name": "java.lang.IllegalArgumentException", "allDeclaredConstructors": true},
     {"name": "java.lang.Math", "allDeclaredMethods": true, "allDeclaredFields": true},
+    {"name": "java.math.BigDecimal", "allDeclaredConstructors": true, "allDeclaredMethods": true},
+    {"name": "java.math.BigInteger", "allDeclaredConstructors": true, "allDeclaredMethods": true},
+    {"name": "java.math.MathContext", "allDeclaredConstructors": true},
     {"name": "java.lang.Number",
      "allDeclaredFields": true,
      "allDeclaredMethods": true
@@ -32,6 +35,12 @@
     {"name": "java.util.concurrent.atomic.AtomicReferenceArray",
      "allDeclaredConstructors": true
     },
+    {"name": "java.util.ConcurrentHashMap", "allDeclaredMethods": true, "allDeclaredConstructors": true},
+    {"name": "java.util.HashMap", "allDeclaredMethods": true, "allDeclaredConstructors": true},
+    {"name": "java.util.TreeMap", "allDeclaredMethods": true, "allDeclaredConstructors": true},
+    {"name": "java.util.IdentityHashMap", "allDeclaredMethods": true, "allDeclaredConstructors": true},
+    {"name": "java.util.LinkedList", "allDeclaredMethods": true, "allDeclaredConstructors": true},
+    {"name": "java.util.ArrayList", "allDeclaredMethods": true, "allDeclaredConstructors": true},
     {"name": "java.lang.System", "methods": [{"name": "currentTimeMillis"}, {"name": "nanoTime"}]},
     {"name": "clojure.lang.RT", "methods": [{"name": "aclone"}, {"name": "aset"}, {"name": "aget"}]},
     {"name": "clojure.lang.LazySeq", "allDeclaredConstructors": true},
