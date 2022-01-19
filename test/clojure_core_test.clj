@@ -1,6 +1,10 @@
 (ns clojure-core-test
+  (:import clojure.lang.Var)
   (:require [clojure.data.xml]
             [clojure.test :refer :all]))
+
+(deftest test-imported
+  (is (= Var clojure.lang.Var)))
 
 (deftest test-numbers
   (clojure.test/is (= 2 (inc 1)))

@@ -350,6 +350,15 @@
          (gen-eval-node (do (doseq [x butlast-body] (evalme x &b))
                             (evalme last-body &b))))))))
 
+
+  ;; resolve class by name. put it in namespace. return class object
+(defmethod seq->eval-node 'clojure.core/import* [_ _ [_ classname]]
+  (assert (string? classname))
+  (gen-eval-node
+    (if-let [cls (symbol->class (symbol classname))]
+      (doto cls (->> (.importClass *ns*))) ;; nincs hozzaadva :scream:
+      (throw (new RuntimeException "Cannot import class.")))))
+
 (defmethod seq->eval-node 'letfn* seq-eval-letfn [iden->idx recur-indices [_ bindings & bodies :as form]]
   (let [promises (for [[k f] (partition 2 bindings)
                        :let [v (volatile! nil)]]
@@ -615,7 +624,9 @@
         (if (class? parent)
           (gen-eval-node (clojure.lang.Reflector/getStaticField ^Class parent (name expr)))
           (throw (ex-info (str "Cannot access symbol! " expr) {:symbol expr})))
-        (throw (ex-info (str "Cannot resolve symbol! " expr) {:symbol expr}))))))
+        (if (class? (resolve expr))
+          (let [cls (resolve expr)] (gen-eval-node cls))
+          (throw (ex-info (str "Cannot resolve symbol! " expr) {:symbol expr})))))))
 
 (defn- coll->eval-node [fmap sym->iden expr]
   (let [elem-nodes (into [] (fmap (partial ->eval-node sym->iden nil)) expr)
