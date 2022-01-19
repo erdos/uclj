@@ -24,6 +24,7 @@
     [clojure.math.combinatorics :as combo]
     [clojure.pprint :as pprint :refer [pprint pp]]
     [clojure.set :as set]
+    [clojure.spec.alpha]
     [clojure.string :as s]
     [clojure.test :refer [deftest testing is are]]
     [clojure.test.check :as check]
@@ -221,14 +222,38 @@
 (def custom-var-impls (atom {}))
 (defmacro custom-var! [v val] `(swap! custom-var-impls assoc ~v ~val))
 
-(declare evaluator)
+(custom-var! #'clojure.core/load-reader
+  (fn [rdr]
+    (with-open [rdr (new java.io.PushbackReader rdr)]
+      (->> (repeatedly #(read {:eof ::eof} rdr))
+           (take-while (partial not= ::eof))
+           (map (@custom-var-impls #'clojure.core/eval))
+           (last)))))
+
 (custom-var! #'clojure.core/load-file
   (fn [fname]
     (binding [*file* (io/file fname)]
-      (with-open [in (new java.io.PushbackReader (io/reader *file*))]
-        (doseq [read (repeatedly #(read {:eof ::eof} in))
-                :while (not= ::eof read)]
-          (evaluator read))))))
+      (with-open [rdr (new java.io.PushbackReader (io/reader *file*))]
+        ((@custom-var-impls #'clojure.core/load-reader) rdr)))))
+
+(custom-var! #'clojure.core/load
+  (fn [& bodies] (throw (new RuntimeException "UCLJ does not yet support clojure.core/load!")))
+  #_(fn [& paths]
+    (doseq [^String path paths]
+      (let [root-resource (fn [lib] (str \/ (.. (name lib) (replace \- \_) (replace \. \/))))
+            root-directory (fn [lib] (let [d (root-resource lib)] (subs d 0 (.lastIndexOf (str d) "/"))))
+            ^String path (if (.startsWith path "/")
+                            path
+                            (str (root-directory (ns-name *ns*)) \/ path))
+            res (or (io/resource (str path ".clj")) (io/resource (str path ".cljc")))]
+        (assert res "No resource found!")
+        ((@custom-var-impls #'clojure.core/load-reader) (io/reader res))))))
+
+(custom-var! #'clojure.core/compile
+  (fn [_] (throw (new RuntimeException "UCLJ does not support clojure.core/compile!"))))
+
+(custom-var! #'clojure.core/load-string
+  (fn [s] ((@custom-var-impls #'clojure.core/load-reader) (java.io.StringReader. s))))
 
 ;; Due to the closed-world assumption, we cannot instantiate array of any types.
 (custom-var! #'clojure.core/into-array

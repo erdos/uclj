@@ -1,8 +1,9 @@
 (ns clojure-core-test
-  (:import clojure.lang.Var)
+  #_(:import clojure.lang.Var)
   (:require [clojure.data.xml]
             [clojure.test :refer :all]))
 
+#_
 (deftest test-imported
   (is (= Var clojure.lang.Var)))
 
@@ -64,3 +65,12 @@
 
 (deftest test-xml-lib
   (is (map? (clojure.data.xml/parse-str "<a>1</a>"))))
+
+(deftest test-load-functions
+  (is (= 2 (eval '(inc 1))))
+  (is (= 2 (load-string "(inc 1)")))
+  (let [tmpfile "/tmp/uclj-test-load-content"
+        tmpfile-clj (str tmpfile ".clj")]
+    (spit tmpfile-clj "(inc 1)")
+    (is (= 2 (load-file tmpfile-clj)))
+    (is (= 2 (load-reader (clojure.java.io/reader tmpfile-clj))))))
