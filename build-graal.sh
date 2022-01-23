@@ -10,6 +10,8 @@ fi
 
 command -v $NATIVE_IMAGE
 
+$NATIVE_IMAGE --version
+
 JARFILE=`ls target/uclj*-standalone.jar`
 
 if [ ! -f "$JARFILE" ]; then
