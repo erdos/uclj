@@ -15,8 +15,8 @@ jobs:
         workflow: clojure.yml
         workflow_conclusion: success
         path: artifacts
-    - run: tar -zcvf uclj-macos-amd64.tar.gz artifacts/uclj-macos-amd64/uclj
-    - run: tar -zcvf uclj-linux-amd64.tar.gz artifacts/uclj-linux-amd64/uclj
+    - run: tar -zcvf uclj-macos-amd64.tar.gz -C artifacts/uclj-macos-amd64 uclj
+    - run: tar -zcvf uclj-linux-amd64.tar.gz -C artifacts/uclj-linux-amd64 uclj
     - uses: "marvinpinto/action-automatic-releases@latest"
       with:
         repo_token: "${{ secrets.GITHUB_TOKEN }}"
