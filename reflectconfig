@@ -35,7 +35,7 @@
     {"name": "java.util.concurrent.atomic.AtomicReferenceArray",
      "allDeclaredConstructors": true
     },
-    {"name": "java.util.ConcurrentHashMap", "allDeclaredMethods": true, "allDeclaredConstructors": true},
+    {"name": "java.util.concurrent.ConcurrentHashMap", "allDeclaredMethods": true, "allDeclaredConstructors": true},
     {"name": "java.util.HashMap", "allDeclaredMethods": true, "allDeclaredConstructors": true},
     {"name": "java.util.TreeMap", "allDeclaredMethods": true, "allDeclaredConstructors": true},
     {"name": "java.util.IdentityHashMap", "allDeclaredMethods": true, "allDeclaredConstructors": true},
