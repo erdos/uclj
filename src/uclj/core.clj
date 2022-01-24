@@ -127,7 +127,7 @@
   (let [e (macroexpand-1-code &env exp)]
     (if (identical? e exp)
       exp
-      (recur &env (with-meta e (meta exp))))))
+      (recur &env e))))
 
 ;; return seq of (fn-name ([args*] bodies*)+)
 (defn- parsed-fn [[_ & bodies]]
