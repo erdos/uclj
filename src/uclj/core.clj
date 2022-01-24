@@ -127,7 +127,7 @@
   (let [e (macroexpand-1-code &env exp)]
     (if (identical? e exp)
       exp
-      (recur &env e))))
+      (recur &env (with-meta e (meta exp))))))
 
 ;; return seq of (fn-name ([args*] bodies*)+)
 (defn- parsed-fn [[_ & bodies]]
@@ -177,7 +177,7 @@
                (meta exp)))
 
            ;; else
-           (map (partial iter &env) expanded))
+           (with-meta (map (partial iter &env) expanded) (meta exp)))
 
          (or (vector? expanded) (set? expanded) (map? expanded))
          (map-coll #(iter &env %) expanded)
@@ -199,9 +199,16 @@
   java.util.regex.Pattern        (evalme [t _] t)
   clojure.lang.Keyword           (evalme [t _] t))
 
+;; save error and location to stack. this info will be used when printing stack trace!!!
+(defn err-report! [e loc]
+  (println :!!BANG!! loc))
+
 ;; TODO: test with interfaces instead of protocols!
 (defmacro gen-eval-node
-  ([m body] `(with-meta (gen-eval-node ~body) ~m))
+  ([m body] `(let [m# ~m]
+                (if (:line m#)
+                  (gen-eval-node (try ~body (catch Throwable t# (err-report! t# m#) (throw t#))))
+                  (with-meta (gen-eval-node ~body) m#))))
   ([body] `(reify EvalNode (evalme [_ ~'&b] (let [~(quote #^objects &b) ~'&b] ~body)))))
 
 (declare ->eval-node)
@@ -224,7 +231,7 @@
 
 (custom-var! #'clojure.core/load-reader
   (fn [rdr]
-    (with-open [rdr (new java.io.PushbackReader rdr)]
+    (with-open [rdr (new clojure.lang.LineNumberingPushbackReader rdr)]
       (->> (repeatedly #(read {:eof ::eof} rdr))
            (take-while (partial not= ::eof))
            (map (@custom-var-impls #'clojure.core/eval))
@@ -266,6 +273,7 @@
     (alter-meta! (var *ns*) assoc :dynamic true)
     (var-set-reset! (var *ns*) (create-ns new-ns))))
 
+;; invocation of core functions is inlined for all arities
 (def clojure-core-inlined-fns
   (template
    (hash-map
@@ -299,8 +307,11 @@
         (template [a-symbol #(symbol (str 'a %))]
           (case (count args)
             ~@(mapcat seq (for [i (range 16)]
-                            [i (list 'gen-eval-node (list* '.invoke (quote ^clojure.lang.IFn (evalme f &b))
-                                                           (for [j (range 1 (inc i))] (list 'evalme (a-symbol j) '&b))))]))
+                            [i (list 'gen-eval-node
+                                     `(::source-meta (meta ~'s))
+                                     (list* '.invoke
+                                            (quote ^clojure.lang.IFn (evalme f &b))
+                                            (for [j (range 1 (inc i))] (list 'evalme (a-symbol j) '&b))))]))
             ;; else
             (gen-eval-node (apply (evalme f &b) (for [e args] (evalme e &b))))))))))
 
@@ -684,6 +695,7 @@
     ;; method calls
     (let [bodies (doall (for [b v] (enhance-code sym->iden b)))]
       (with-meta bodies {::symbol-used       (set (mapcat (comp ::symbol-used meta) bodies))
+                         ::source-meta       (meta v)
                          ::symbol-introduced (set (mapcat (comp ::symbol-introduced meta) bodies))}))
     ;; scalar values: string, numbers, etc.
     v))
@@ -765,6 +777,7 @@
     (with-meta (if fname (list* 'fn* fname fbodies) (list* 'fn* fbodies))
       ;; symbol-introduced is nil because it is a new closure!
       {::meta-exp    meta-exp
+       ;; ::source-meta       (meta fn-expression) ;; select-keys?
        ::symbol-used (set (mapcat (comp ::symbol-used meta) fbodies))})))
 
 (defmethod enhance-code 'try [sym->iden [_ & xs]]
