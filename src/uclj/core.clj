@@ -224,7 +224,7 @@
 
 (custom-var! #'clojure.core/load-reader
   (fn [rdr]
-    (with-open [rdr (new java.io.PushbackReader rdr)]
+    (with-open [rdr (new clojure.lang.LineNumberingPushbackReader rdr)]
       (->> (repeatedly #(read {:eof ::eof} rdr))
            (take-while (partial not= ::eof))
            (map (@custom-var-impls #'clojure.core/eval))
@@ -233,8 +233,7 @@
 (custom-var! #'clojure.core/load-file
   (fn [fname]
     (binding [*file* (io/file fname)]
-      (with-open [rdr (new java.io.PushbackReader (io/reader *file*))]
-        ((@custom-var-impls #'clojure.core/load-reader) rdr)))))
+      ((@custom-var-impls #'clojure.core/load-reader) (io/reader *file*)))))
 
 (custom-var! #'clojure.core/load
   (fn [& bodies] (throw (new RuntimeException "UCLJ does not yet support clojure.core/load!")))
