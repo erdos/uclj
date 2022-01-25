@@ -20,5 +20,5 @@
   :main uclj.core
   :aot :all
   :java-source-paths ["src"]
-  :javac-options     ["-target" "1.6" "-source" "1.6"]
+  :javac-options     ["-target" "1.7" "-source" "1.7"]
   :repl-options {:init-ns uclj.core})
