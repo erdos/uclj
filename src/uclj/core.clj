@@ -201,19 +201,16 @@
 
 (def exception-stack (java.util.Collections/synchronizedMap (new java.util.WeakHashMap)))
 
-;; save error and location to stack. this info will be used when printing stack trace!!!
-(defn err-report! [t loc] ;; TODO: add new-ctx? arg so function boundaries can add new stack frame!
-  (let [f  (reify java.util.function.Function (apply [_ _] (list (promise))))
-        ps (.computeIfAbsent exception-stack t f)]
-    (println :!!BANG!! loc)
-    (deliver (first ps) loc)))
+(defmacro with-err-report [loc expr]
+  `(try ~expr
+     (catch Throwable t#
+       (println :err-report! ~loc)
+       (.compute ^java.util.Map exception-stack t# (reify java.util.function.BiFunction (apply [_# _# v#] (cons ~loc v#))))
+       (throw t#))))
 
 ;; TODO: test with interfaces instead of protocols!
 (defmacro gen-eval-node
-  ([m body] `(let [m# ~m]
-                (if (:line m#)
-                  (gen-eval-node (try ~body (catch Throwable t# (err-report! t# m#) (throw t#))))
-                  (with-meta (gen-eval-node ~body) m#))))
+  ([m body] `(with-meta (gen-eval-node ~body) ~m))
   ([body] `(reify EvalNode (evalme [_ ~'&b] (let [~(quote #^objects &b) ~'&b] ~body)))))
 
 (declare ->eval-node)
@@ -277,6 +274,15 @@
     (alter-meta! (var *ns*) assoc :dynamic true)
     (var-set-reset! (var *ns*) (create-ns new-ns))))
 
+;; Emits a clojure (let[]) expression in which values in let-vals are bound to new local vars
+;; and body is result of calling body-fn with the generated var names.
+(defn- gen-let-form [let-vals body-fn]
+  (assert (seq? let-vals))
+  (let [let-vars (repeatedly (count let-vals) gensym)]
+    (list 'let*
+          (vec (interleave let-vars let-vals))
+          (apply body-fn let-vars))))
+
 ;; invocation of core functions is inlined for all arities
 (def clojure-core-inlined-fns
   (template
@@ -289,30 +295,34 @@
                                   #'clojure.core/alength #'clojure.core/aset} v))
                     :when (not (@custom-var-impls v))
                     :when (not (:macro (meta v)))
-                    :let [arglists (var->arglists v)]
+                    :let [arglists (var->arglists v)
+                          +meta    (gensym)] ;; symbol will reference metadata of original form
                     :when arglists]
                 [v (list* 'fn*
                            (symbol (str (name (symbol v)) "-inlined"))
                            (for [args arglists]
                              (if (= 'variadic (last args))
-                               (list (vec args) (list 'gen-eval-node (concat ['clojure.core/apply (symbol v)]
+                               ;; TODO: also add to variadic calls!
+                               (list (vec (cons +meta args)) (list 'gen-eval-node (concat ['clojure.core/apply (symbol v)]
                                                                              (for [a (butlast (butlast args))] (list 'evalme a '&b))
                                                                              [(list 'clojure.core/for [(last args) (last args)] (list 'evalme (last args) '&b))])))
-                               (list (vec args) (list 'gen-eval-node (list* (symbol v) (for [a args] (list 'evalme a '&b))))))))])))))
+                               (list (vec (cons +meta args)) (list 'gen-eval-node 
+                                                      (gen-let-form (for [a args] (list 'evalme a '&b))
+                                                                    (fn [& arg-forms] (list 'with-err-report +meta (list* (symbol v) arg-forms)))))))))])))))
 
 (defmethod seq->eval-node ::default seq-eval-call [&a _ s]
   (if (empty? s)
     (gen-eval-node ())
     (let [[f & args] (map (partial ->eval-node &a nil) s)
-          [a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15] args] ;; TODO: unroll with template!
+          [a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15] args
+          form-meta (::source-meta (meta s))] ;; TODO: unroll with template!
       (dorun args)
       (if-let [call-factory (clojure-core-inlined-fns (::var (meta f)))]
-        (apply call-factory args)
+        (apply call-factory form-meta args)
         (template [a-symbol #(symbol (str 'a %))]
           (case (count args)
             ~@(mapcat seq (for [i (range 16)]
                             [i (list 'gen-eval-node
-                                     `(::source-meta (meta ~'s))
                                      (list* '.invoke
                                             (quote ^clojure.lang.IFn (evalme f &b))
                                             (for [j (range 1 (inc i))] (list 'evalme (a-symbol j) '&b))))]))
