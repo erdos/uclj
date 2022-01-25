@@ -199,9 +199,14 @@
   java.util.regex.Pattern        (evalme [t _] t)
   clojure.lang.Keyword           (evalme [t _] t))
 
+(def exception-stack (java.util.Collections/synchronizedMap (new java.util.WeakHashMap)))
+
 ;; save error and location to stack. this info will be used when printing stack trace!!!
-(defn err-report! [e loc]
-  (println :!!BANG!! loc))
+(defn err-report! [t loc] ;; TODO: add new-ctx? arg so function boundaries can add new stack frame!
+  (let [f  (reify java.util.function.Function (apply [_ _] (list (promise))))
+        ps (.computeIfAbsent exception-stack t f)]
+    (println :!!BANG!! loc)
+    (deliver (first ps) loc)))
 
 ;; TODO: test with interfaces instead of protocols!
 (defmacro gen-eval-node
