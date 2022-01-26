@@ -872,7 +872,6 @@
 
 (alter-var-root #'stacktrace/print-stack-trace
   (fn [old-print-stack-trace]
-    (println :printsta old-print-stack-trace (meta old-print-stack-trace))
     (fn print-stack-trace-2 [^Throwable tr & n]
       (println :print-stack-trace)
       (if-let [st (first (reduce (fn [[xs ns fn] entry]
