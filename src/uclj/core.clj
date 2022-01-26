@@ -25,6 +25,7 @@
     [clojure.pprint :as pprint :refer [pprint pp]]
     [clojure.set :as set]
     [clojure.spec.alpha]
+    [clojure.stacktrace :as stacktrace]
     [clojure.string :as s]
     [clojure.test :refer [deftest testing is are]]
     [clojure.test.check :as check]
@@ -199,13 +200,13 @@
   java.util.regex.Pattern        (evalme [t _] t)
   clojure.lang.Keyword           (evalme [t _] t))
 
-(def exception-stack (java.util.Collections/synchronizedMap (new java.util.WeakHashMap)))
+(def ^java.util.Map exception-stack (java.util.Collections/synchronizedMap (new java.util.WeakHashMap)))
 
 (defmacro with-err-report [loc expr]
   `(try ~expr
      (catch Throwable t#
-       (println :err-report! ~loc)
-       (.compute ^java.util.Map exception-stack t# (reify java.util.function.BiFunction (apply [_# _# v#] (cons ~loc v#))))
+       (when-let [loc# ~loc]
+         (.compute exception-stack t# (reify java.util.function.BiFunction (apply [_# _# v#] (cons loc# v#)))))
        (throw t#))))
 
 ;; TODO: test with interfaces instead of protocols!
@@ -241,8 +242,8 @@
 
 (custom-var! #'clojure.core/load-file
   (fn [fname]
-    (binding [*file* (io/file fname)]
-      ((@custom-var-impls #'clojure.core/load-reader) (io/reader *file*)))))
+    (binding [*file* fname]
+      ((@custom-var-impls #'clojure.core/load-reader) (io/reader (io/file fname))))))
 
 (custom-var! #'clojure.core/load
   (fn [& bodies] (throw (new RuntimeException "UCLJ does not yet support clojure.core/load!")))
@@ -313,9 +314,10 @@
 (defmethod seq->eval-node ::default seq-eval-call [&a _ s]
   (if (empty? s)
     (gen-eval-node ())
-    (let [[f & args] (map (partial ->eval-node &a nil) s)
-          [a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15] args
-          form-meta (::source-meta (meta s))] ;; TODO: unroll with template!
+    (let [[f & args :as f+arglists] (map (partial ->eval-node &a nil) s)
+          [a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15] args ;; TODO: unroll with template!
+          form-meta (::source-meta (meta s))
+          form-meta (when form-meta (assoc form-meta :file *file*))]
       (dorun args)
       (if-let [call-factory (clojure-core-inlined-fns (::var (meta f)))]
         (apply call-factory form-meta args)
@@ -323,9 +325,8 @@
           (case (count args)
             ~@(mapcat seq (for [i (range 16)]
                             [i (list 'gen-eval-node
-                                     (list* '.invoke
-                                            (quote ^clojure.lang.IFn (evalme f &b))
-                                            (for [j (range 1 (inc i))] (list 'evalme (a-symbol j) '&b))))]))
+                                     (gen-let-form (cons (with-meta '(evalme f &b) {:tag 'clojure.lang.IFn}) (for [j (range 1 (inc i))] (list 'evalme (a-symbol j) '&b)))
+                                                   (fn [f & as] (list 'with-err-report 'form-meta (list* '.invoke f as)))))]))
             ;; else
             (gen-eval-node (apply (evalme f &b) (for [e args] (evalme e &b))))))))))
 
@@ -588,6 +589,7 @@
   (assert (= 2 (count form)))
   (assert (or (symbol? e) (seq? e)))
   (let [e (->eval-node &a nil e)]
+    ;; TODO: mark exception as rethrown!
     (gen-eval-node (throw (evalme e &b)))))
 
 (defmethod seq->eval-node 'var [&a _ [_ v]]
@@ -859,6 +861,22 @@
                   (some (comp :test  meta) (vals (ns-interns ns))))]
     ns))
 
+(alter-var-root #'stacktrace/print-stack-trace
+  (fn [print-stack-trace]
+    (fn [^Throwable ex]
+      (if-let [custom-stack (some-> (.get exception-stack ex) reverse)]
+        (do (stacktrace/print-throwable ex)
+            (newline)
+            (when-let [item (first custom-stack)]
+              (println (str " at " (:file item) ":" (:line item) ":" (:column item))))
+            (doseq [item (rest custom-stack)]
+              (println (str "    " (:file item) ":" (:line item) ":" (:column item)))))
+        (print-stack-trace)))))
+
+(Thread/setDefaultUncaughtExceptionHandler
+  (reify Thread$UncaughtExceptionHandler
+    (uncaughtException [_ thread ex] (stacktrace/print-stack-trace ex))))
+
 (defn -main [& args]
   (evaluator '(in-ns 'user))
   (evaluator '(run! require uclj.core/namespaces-to-require))
@@ -869,8 +887,11 @@
 
     (and (first args) (.exists (io/file (first args))))
     (let [test? (= "--test" (second args))]
-      (binding [*command-line-args* (if test? (nnext args) (next args))]
-        (evaluator `(load-file ~(first args))))
+      (try (binding [*command-line-args* (if test? (nnext args) (next args))]
+             (evaluator `(load-file ~(first args))))
+           (catch Throwable t
+             (stacktrace/print-stack-trace t)
+             (System/exit 1)))
       (when test?
         (let [test-result (apply clojure.test/run-tests (all-test-namespaces))]
           (when-not (zero? (:fail test-result))
@@ -890,7 +911,7 @@
                      (var-set-reset! #'*1 e)
                      (println e))
                    (catch Throwable t
-                     (.printStackTrace t)
+                     (stacktrace/print-stack-trace t)
                      (var-set-reset! #'*e t)))
               (recur))))
         (println "EOF, bye!"))))
