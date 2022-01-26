@@ -796,7 +796,6 @@
     (with-meta (if fname (list* 'fn* fname fbodies) (list* 'fn* fbodies))
       ;; symbol-introduced is nil because it is a new closure!
       {::meta-exp    meta-exp
-       ;; ::source-meta       (meta fn-expression) ;; select-keys?
        ::symbol-used (set (mapcat (comp ::symbol-used meta) fbodies))})))
 
 (defmethod enhance-code 'try [sym->iden [_ & xs]]
@@ -866,14 +865,16 @@
 
 (alter-var-root #'stacktrace/print-trace-element
   (fn [print-trace-element]
-    (fn [e]
+    (fn stack-trace-element-2 [e]
       (if (map? e)
         (print (str (:ns e) "/" (:fn e) "(" (:file e) ":" (:line e) ":" (:column e) ")"))
         (print-trace-element e)))))
 
 (alter-var-root #'stacktrace/print-stack-trace
-  (fn [print-stack-trace]
-    (fn [^Throwable tr]
+  (fn [old-print-stack-trace]
+    (println :printsta old-print-stack-trace (meta old-print-stack-trace))
+    (fn print-stack-trace-2 [^Throwable tr & n]
+      (println :print-stack-trace)
       (if-let [st (first (reduce (fn [[xs ns fn] entry]
                                   (if (:ns entry)
                                     [xs (:ns entry) (:fn entry)]
@@ -890,33 +891,37 @@
               (print "    ")
               (stacktrace/print-trace-element e)
               (newline)))
-        (print-stack-trace tr)))))
+        (old-print-stack-trace tr n)))))
+
+(defmacro ^:private try-catch-error [exit-code body]
+ `(try ~body
+    (catch Throwable ~'t
+      (binding [*out* *err*]
+        (stacktrace/print-stack-trace ~'t)
+        (flush))
+      ~(if (int? exit-code) `(System/exit ~exit-code) exit-code))))
 
 (Thread/setDefaultUncaughtExceptionHandler
   (reify Thread$UncaughtExceptionHandler
-    (uncaughtException [_ thread ex] (binding [*out* *err*] (stacktrace/print-stack-trace ex) (flush)))))
+    (uncaughtException [_ thread ex] (try-catch-error nil (throw ex)))))
 
 (defn -main [& args]
   (evaluator '(in-ns 'user))
   (evaluator '(run! require uclj.core/namespaces-to-require))
   (cond
     (and (first args) (.startsWith (str (first args)) "("))
-    (binding [*command-line-args* (second args)]  
-      (println (evaluator (read-string (first args)))))
+    (binding [*command-line-args* (second args)]
+      (try-catch-error 1 (println (evaluator (read-string (first args))))))
 
     (and (first args) (.exists (io/file (first args))))
     (let [test? (= "--test" (second args))]
-      (try (binding [*command-line-args* (if test? (nnext args) (next args))]
-             (evaluator `(load-file ~(first args))))
-           (catch Throwable t
-             (binding [*out* *err*]
-               (stacktrace/print-stack-trace t)
-               (flush))
-             (System/exit 1)))
+      (try-catch-error 1 (binding [*command-line-args* (if test? (nnext args) (next args))]
+                           (evaluator `(load-file ~(first args)))) )
       (when test?
-        (let [test-result (apply clojure.test/run-tests (all-test-namespaces))]
-          (when-not (zero? (:fail test-result))
-            (System/exit 1)))))
+        (try-catch-error 2
+          (let [test-result (apply clojure.test/run-tests (all-test-namespaces))]
+            (when-not (zero? (:fail test-result))
+              (System/exit 1))))))
 
     :else ;; interactive mode
     (do (println "Welcome to the small interpreter!")
@@ -926,16 +931,12 @@
           (print (str (ns-name *ns*) "=> ")) (flush)
           (let [read (read {:eof ::eof} *in*)]
             (when-not (= ::eof read)
-              (try (let [e (evaluator read)]
-                     (var-set-reset! #'*3 *2)
-                     (var-set-reset! #'*2 *1)
-                     (var-set-reset! #'*1 e)
-                     (println e))
-                   (catch Throwable t
-                     (binding [*out* *err*]
-                       (stacktrace/print-stack-trace t)
-                       (flush))
-                     (var-set-reset! #'*e t)))
+              (try-catch-error (var-set-reset! #'*e t)
+                               (let [e (evaluator read)]
+                                 (var-set-reset! #'*3 *2)
+                                 (var-set-reset! #'*2 *1)
+                                 (var-set-reset! #'*1 e)
+                                 (println e)))
               (recur))))
         (println "EOF, bye!"))))
 
