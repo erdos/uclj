@@ -434,6 +434,7 @@
   `(let [~'enclosed-array-size                                                  (int (if ~fname (inc (count ~symbol-used)) (count ~symbol-used)))
          body-vararg#                                                           (:variadic ~arity->body-node)
          body-vararg-symbols#                                                   (:variadic ~arity->symbols-introduced)
+         ~'err-meta                                                             {:fn (or ~fname "fn$anonymous") :ns *ns*}
          [~@(for [i (range (inc max-arity))] (symbol (str 'body i)))]           (map ~arity->body-node (range))
          [~@(for [i (range (inc max-arity))] (symbol (str 'body i '-symbols)))] (map ~arity->symbols-introduced (range))]
     (gen-eval-node
@@ -448,22 +449,24 @@
                                                           ~'enclosed-array (+ (count ~(symbol (str 'body i '-symbols))) ~'enclosed-array-size))]
                                   ~@(for [j (range i)]
                                       (list 'aset 'invocation-array (list '+ j 'enclosed-array-size) (nth arg-symbols j)))
-                                    (loop []
-                                      (let [result# (evalme ~(symbol (str 'body i)) ~'invocation-array)]
-                                        (if (identical? ::recur result#)
-                                          (recur)
-                                          result#))))))
+                                    (with-err-report ~'err-meta
+                                      (loop []
+                                        (let [result# (evalme ~(symbol (str 'body i)) ~'invocation-array)]
+                                          (if (identical? ::recur result#)
+                                            (recur)
+                                            result#)))))))
                    ([~@(for [i (range max-arity)] (symbol (str 'arg- i))) ~'& arg-rest#]
                        (assert body-vararg-symbols# "Called with too many parameters!")
                        (let [~'invocation-array (java.util.Arrays/copyOf ~'enclosed-array (+ (count body-vararg-symbols#) ~'enclosed-array-size))]
                           ~@(for [j (range (+ max-arity))]
                               (list 'aset 'invocation-array (list '+ j 'enclosed-array-size) (symbol (str 'arg- j))))
                             (aset ~'invocation-array (+ ~max-arity ~'enclosed-array-size) arg-rest#)
-                            (loop []
-                              (let [result# (evalme body-vararg# ~'invocation-array)]
-                                (if (identical? ::recur result#)
-                                  (recur)
-                                  result#))))))
+                            (with-err-report ~'err-meta
+                              (loop []
+                                (let [result# (evalme body-vararg# ~'invocation-array)]
+                                  (if (identical? ::recur result#)
+                                    (recur)
+                                    result#)))))))
             (cond->> ~fname (aset #^objects ~'enclosed-array (dec ~'enclosed-array-size))))))))
 
 
@@ -861,21 +864,37 @@
                   (some (comp :test  meta) (vals (ns-interns ns))))]
     ns))
 
+(alter-var-root #'stacktrace/print-trace-element
+  (fn [print-trace-element]
+    (fn [e]
+      (if (map? e)
+        (print (str (:ns e) "/" (:fn e) "(" (:file e) ":" (:line e) ":" (:column e) ")"))
+        (print-trace-element e)))))
+
 (alter-var-root #'stacktrace/print-stack-trace
   (fn [print-stack-trace]
-    (fn [^Throwable ex]
-      (if-let [custom-stack (some-> (.get exception-stack ex) reverse)]
-        (do (stacktrace/print-throwable ex)
+    (fn [^Throwable tr]
+      (if-let [st (first (reduce (fn [[xs ns fn] entry]
+                                  (if (:ns entry)
+                                    [xs (:ns entry) (:fn entry)]
+                                    [(cons (assoc entry :ns ns :fn fn) xs) ns fn]))
+                                 [nil nil nil] (.get exception-stack tr)))]
+        (do (stacktrace/print-throwable tr)
             (newline)
-            (when-let [item (first custom-stack)]
-              (println (str " at " (:file item) ":" (:line item) ":" (:column item))))
-            (doseq [item (rest custom-stack)]
-              (println (str "    " (:file item) ":" (:line item) ":" (:column item)))))
-        (print-stack-trace)))))
+            (print " at ") 
+            (if-let [e (first st)]
+              (stacktrace/print-trace-element e)
+              (print "[empty stack trace]"))
+            (newline)
+            (doseq [e (rest st)]
+              (print "    ")
+              (stacktrace/print-trace-element e)
+              (newline)))
+        (print-stack-trace tr)))))
 
 (Thread/setDefaultUncaughtExceptionHandler
   (reify Thread$UncaughtExceptionHandler
-    (uncaughtException [_ thread ex] (stacktrace/print-stack-trace ex))))
+    (uncaughtException [_ thread ex] (binding [*out* *err*] (stacktrace/print-stack-trace ex) (flush)))))
 
 (defn -main [& args]
   (evaluator '(in-ns 'user))
@@ -890,7 +909,9 @@
       (try (binding [*command-line-args* (if test? (nnext args) (next args))]
              (evaluator `(load-file ~(first args))))
            (catch Throwable t
-             (stacktrace/print-stack-trace t)
+             (binding [*out* *err*]
+               (stacktrace/print-stack-trace t)
+               (flush))
              (System/exit 1)))
       (when test?
         (let [test-result (apply clojure.test/run-tests (all-test-namespaces))]
@@ -911,7 +932,9 @@
                      (var-set-reset! #'*1 e)
                      (println e))
                    (catch Throwable t
-                     (stacktrace/print-stack-trace t)
+                     (binding [*out* *err*]
+                       (stacktrace/print-stack-trace t)
+                       (flush))
                      (var-set-reset! #'*e t)))
               (recur))))
         (println "EOF, bye!"))))
