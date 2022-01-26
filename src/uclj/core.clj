@@ -25,6 +25,7 @@
     [clojure.pprint :as pprint :refer [pprint pp]]
     [clojure.set :as set]
     [clojure.spec.alpha]
+    [clojure.stacktrace :as stacktrace]
     [clojure.string :as s]
     [clojure.test :refer [deftest testing is are]]
     [clojure.test.check :as check]
@@ -177,7 +178,7 @@
                (meta exp)))
 
            ;; else
-           (map (partial iter &env) expanded))
+           (with-meta (map (partial iter &env) expanded) (meta exp)))
 
          (or (vector? expanded) (set? expanded) (map? expanded))
          (map-coll #(iter &env %) expanded)
@@ -198,6 +199,15 @@
   String                         (evalme [t _] t)
   java.util.regex.Pattern        (evalme [t _] t)
   clojure.lang.Keyword           (evalme [t _] t))
+
+(def ^java.util.Map exception-stack (java.util.Collections/synchronizedMap (new java.util.WeakHashMap)))
+
+(defmacro with-err-report [loc expr]
+  `(try ~expr
+     (catch Throwable t#
+       (when-let [loc# ~loc]
+         (.compute exception-stack t# (reify java.util.function.BiFunction (apply [_# _# v#] (cons loc# v#)))))
+       (throw t#))))
 
 ;; TODO: test with interfaces instead of protocols!
 (defmacro gen-eval-node
@@ -232,8 +242,8 @@
 
 (custom-var! #'clojure.core/load-file
   (fn [fname]
-    (binding [*file* (io/file fname)]
-      ((@custom-var-impls #'clojure.core/load-reader) (io/reader *file*)))))
+    (binding [*file* fname]
+      ((@custom-var-impls #'clojure.core/load-reader) (io/reader (io/file fname))))))
 
 (custom-var! #'clojure.core/load
   (fn [& bodies] (throw (new RuntimeException "UCLJ does not yet support clojure.core/load!")))
@@ -265,6 +275,16 @@
     (alter-meta! (var *ns*) assoc :dynamic true)
     (var-set-reset! (var *ns*) (create-ns new-ns))))
 
+;; Emits a clojure (let[]) expression in which values in let-vals are bound to new local vars
+;; and body is result of calling body-fn with the generated var names.
+(defn- gen-let-form [let-vals body-fn]
+  (assert (seq? let-vals))
+  (let [let-vars (repeatedly (count let-vals) gensym)]
+    (list 'let*
+          (vec (interleave let-vars let-vals))
+          (apply body-fn let-vars))))
+
+;; invocation of core functions is inlined for all arities
 (def clojure-core-inlined-fns
   (template
    (hash-map
@@ -276,30 +296,37 @@
                                   #'clojure.core/alength #'clojure.core/aset} v))
                     :when (not (@custom-var-impls v))
                     :when (not (:macro (meta v)))
-                    :let [arglists (var->arglists v)]
+                    :let [arglists (var->arglists v)
+                          +meta    (gensym)] ;; symbol will reference metadata of original form
                     :when arglists]
                 [v (list* 'fn*
                            (symbol (str (name (symbol v)) "-inlined"))
                            (for [args arglists]
                              (if (= 'variadic (last args))
-                               (list (vec args) (list 'gen-eval-node (concat ['clojure.core/apply (symbol v)]
+                               ;; TODO: also add to variadic calls!
+                               (list (vec (cons +meta args)) (list 'gen-eval-node (concat ['clojure.core/apply (symbol v)]
                                                                              (for [a (butlast (butlast args))] (list 'evalme a '&b))
                                                                              [(list 'clojure.core/for [(last args) (last args)] (list 'evalme (last args) '&b))])))
-                               (list (vec args) (list 'gen-eval-node (list* (symbol v) (for [a args] (list 'evalme a '&b))))))))])))))
+                               (list (vec (cons +meta args)) (list 'gen-eval-node 
+                                                      (gen-let-form (for [a args] (list 'evalme a '&b))
+                                                                    (fn [& arg-forms] (list 'with-err-report +meta (list* (symbol v) arg-forms)))))))))])))))
 
 (defmethod seq->eval-node ::default seq-eval-call [&a _ s]
   (if (empty? s)
     (gen-eval-node ())
-    (let [[f & args] (map (partial ->eval-node &a nil) s)
-          [a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15] args] ;; TODO: unroll with template!
+    (let [[f & args :as f+arglists] (map (partial ->eval-node &a nil) s)
+          [a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15] args ;; TODO: unroll with template!
+          form-meta (::source-meta (meta s))
+          form-meta (when form-meta (assoc form-meta :file *file*))]
       (dorun args)
       (if-let [call-factory (clojure-core-inlined-fns (::var (meta f)))]
-        (apply call-factory args)
+        (apply call-factory form-meta args)
         (template [a-symbol #(symbol (str 'a %))]
           (case (count args)
             ~@(mapcat seq (for [i (range 16)]
-                            [i (list 'gen-eval-node (list* '.invoke (quote ^clojure.lang.IFn (evalme f &b))
-                                                           (for [j (range 1 (inc i))] (list 'evalme (a-symbol j) '&b))))]))
+                            [i (list 'gen-eval-node
+                                     (gen-let-form (cons (with-meta '(evalme f &b) {:tag 'clojure.lang.IFn}) (for [j (range 1 (inc i))] (list 'evalme (a-symbol j) '&b)))
+                                                   (fn [f & as] (list 'with-err-report 'form-meta (list* '.invoke f as)))))]))
             ;; else
             (gen-eval-node (apply (evalme f &b) (for [e args] (evalme e &b))))))))))
 
@@ -407,6 +434,7 @@
   `(let [~'enclosed-array-size                                                  (int (if ~fname (inc (count ~symbol-used)) (count ~symbol-used)))
          body-vararg#                                                           (:variadic ~arity->body-node)
          body-vararg-symbols#                                                   (:variadic ~arity->symbols-introduced)
+         ~'err-meta                                                             {:fn (or ~fname "fn$anonymous") :ns *ns*}
          [~@(for [i (range (inc max-arity))] (symbol (str 'body i)))]           (map ~arity->body-node (range))
          [~@(for [i (range (inc max-arity))] (symbol (str 'body i '-symbols)))] (map ~arity->symbols-introduced (range))]
     (gen-eval-node
@@ -421,22 +449,24 @@
                                                           ~'enclosed-array (+ (count ~(symbol (str 'body i '-symbols))) ~'enclosed-array-size))]
                                   ~@(for [j (range i)]
                                       (list 'aset 'invocation-array (list '+ j 'enclosed-array-size) (nth arg-symbols j)))
-                                    (loop []
-                                      (let [result# (evalme ~(symbol (str 'body i)) ~'invocation-array)]
-                                        (if (identical? ::recur result#)
-                                          (recur)
-                                          result#))))))
+                                    (with-err-report ~'err-meta
+                                      (loop []
+                                        (let [result# (evalme ~(symbol (str 'body i)) ~'invocation-array)]
+                                          (if (identical? ::recur result#)
+                                            (recur)
+                                            result#)))))))
                    ([~@(for [i (range max-arity)] (symbol (str 'arg- i))) ~'& arg-rest#]
                        (assert body-vararg-symbols# "Called with too many parameters!")
                        (let [~'invocation-array (java.util.Arrays/copyOf ~'enclosed-array (+ (count body-vararg-symbols#) ~'enclosed-array-size))]
                           ~@(for [j (range (+ max-arity))]
                               (list 'aset 'invocation-array (list '+ j 'enclosed-array-size) (symbol (str 'arg- j))))
                             (aset ~'invocation-array (+ ~max-arity ~'enclosed-array-size) arg-rest#)
-                            (loop []
-                              (let [result# (evalme body-vararg# ~'invocation-array)]
-                                (if (identical? ::recur result#)
-                                  (recur)
-                                  result#))))))
+                            (with-err-report ~'err-meta
+                              (loop []
+                                (let [result# (evalme body-vararg# ~'invocation-array)]
+                                  (if (identical? ::recur result#)
+                                    (recur)
+                                    result#)))))))
             (cond->> ~fname (aset #^objects ~'enclosed-array (dec ~'enclosed-array-size))))))))
 
 
@@ -562,6 +592,7 @@
   (assert (= 2 (count form)))
   (assert (or (symbol? e) (seq? e)))
   (let [e (->eval-node &a nil e)]
+    ;; TODO: mark exception as rethrown!
     (gen-eval-node (throw (evalme e &b)))))
 
 (defmethod seq->eval-node 'var [&a _ [_ v]]
@@ -683,6 +714,7 @@
     ;; method calls
     (let [bodies (doall (for [b v] (enhance-code sym->iden b)))]
       (with-meta bodies {::symbol-used       (set (mapcat (comp ::symbol-used meta) bodies))
+                         ::source-meta       (meta v)
                          ::symbol-introduced (set (mapcat (comp ::symbol-introduced meta) bodies))}))
     ;; scalar values: string, numbers, etc.
     v))
@@ -831,22 +863,64 @@
                   (some (comp :test  meta) (vals (ns-interns ns))))]
     ns))
 
+(alter-var-root #'stacktrace/print-trace-element
+  (fn [print-trace-element]
+    (fn stack-trace-element-2 [e]
+      (if (map? e)
+        (print (str (:ns e) "/" (:fn e) "(" (:file e) ":" (:line e) ":" (:column e) ")"))
+        (print-trace-element e)))))
+
+(alter-var-root #'stacktrace/print-stack-trace
+  (fn [old-print-stack-trace]
+    (fn print-stack-trace-2 [^Throwable tr & n]
+      (println :print-stack-trace)
+      (if-let [st (first (reduce (fn [[xs ns fn] entry]
+                                  (if (:ns entry)
+                                    [xs (:ns entry) (:fn entry)]
+                                    [(cons (assoc entry :ns ns :fn fn) xs) ns fn]))
+                                 [nil nil nil] (.get exception-stack tr)))]
+        (do (stacktrace/print-throwable tr)
+            (newline)
+            (print " at ") 
+            (if-let [e (first st)]
+              (stacktrace/print-trace-element e)
+              (print "[empty stack trace]"))
+            (newline)
+            (doseq [e (rest st)]
+              (print "    ")
+              (stacktrace/print-trace-element e)
+              (newline)))
+        (old-print-stack-trace tr n)))))
+
+(defmacro ^:private try-catch-error [exit-code body]
+ `(try ~body
+    (catch Throwable ~'t
+      (binding [*out* *err*]
+        (stacktrace/print-stack-trace ~'t)
+        (flush))
+      ~(if (int? exit-code) `(System/exit ~exit-code) exit-code))))
+
+(Thread/setDefaultUncaughtExceptionHandler
+  (reify Thread$UncaughtExceptionHandler
+    (uncaughtException [_ thread ex] (try-catch-error nil (throw ex)))))
+
 (defn -main [& args]
   (evaluator '(in-ns 'user))
   (evaluator '(run! require uclj.core/namespaces-to-require))
   (cond
     (and (first args) (.startsWith (str (first args)) "("))
-    (binding [*command-line-args* (second args)]  
-      (println (evaluator (read-string (first args)))))
+    (binding [*command-line-args* (second args)]
+      (try-catch-error 1 (println (evaluator (read-string (first args))))))
 
     (and (first args) (.exists (io/file (first args))))
     (let [test? (= "--test" (second args))]
-      (binding [*command-line-args* (if test? (nnext args) (next args))]
-        (evaluator `(load-file ~(first args))))
+      (try-catch-error 1 (binding [*command-line-args* (if test? (nnext args) (next args))]
+                           (evaluator `(load-file ~(first args)))) )
       (when test?
-        (let [test-result (apply clojure.test/run-tests (all-test-namespaces))]
-          (when-not (zero? (:fail test-result))
-            (System/exit 1)))))
+        (try-catch-error 2
+          (let [test-result (apply clojure.test/run-tests (all-test-namespaces))]
+            (when-not (zero? (:fail test-result))
+              (System/exit 1))))))
 
     :else ;; interactive mode
     (do (println "Welcome to the small interpreter!")
@@ -856,14 +930,12 @@
           (print (str (ns-name *ns*) "=> ")) (flush)
           (let [read (read {:eof ::eof} *in*)]
             (when-not (= ::eof read)
-              (try (let [e (evaluator read)]
-                     (var-set-reset! #'*3 *2)
-                     (var-set-reset! #'*2 *1)
-                     (var-set-reset! #'*1 e)
-                     (println e))
-                   (catch Throwable t
-                     (.printStackTrace t)
-                     (var-set-reset! #'*e t)))
+              (try-catch-error (var-set-reset! #'*e t)
+                               (let [e (evaluator read)]
+                                 (var-set-reset! #'*3 *2)
+                                 (var-set-reset! #'*2 *1)
+                                 (var-set-reset! #'*1 e)
+                                 (println e)))
               (recur))))
         (println "EOF, bye!"))))
 
