@@ -14,3 +14,5 @@ pom.xml.asc
 *.build_artifacts.txt
 /uclj
 /reports
+.clj-kondo
+.lsp
